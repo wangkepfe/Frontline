@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FRONTLINE — card-commanded warfare</title>
+</head>
+<body>
+  <div id="app">
+    <div id="stage"></div>
+
+    <div id="hud" class="hidden">
+      <div id="world-ui"></div>
+
+      <!-- the battlefield is a diamond; the four staff posts hold its corners.
+           Each post is anchored by its officer's PROFILE CARD (personnel file);
+           the desk's two proposals arc around it, hugging the diamond edge. -->
+      <div class="post tl" id="post-stats">
+        <div class="tl-row">
+          <div class="profile">
+            <span class="portrait" data-portrait="stats"></span>
+            <div class="dossier">
+              <b>STATISTICS</b>
+              <span class="rank">LT. E. VOSS</span>
+              <i>sitrep &amp; ledgers</i>
+            </div>
+          </div>
+          <div class="info-col">
+            <div id="resources">
+              <span class="pill gold" data-icn="gold"><b id="res-gold">0</b></span>
+              <span class="pill oil" data-icn="oil"><b id="res-oil">0</b></span>
+              <span class="pill power" id="pill-power" data-icn="power"><b id="res-power">0/0</b></span>
+            </div>
+            <div id="resources2">
+              <span class="pill time" data-icn="clock"><b id="clock">0:00</b></span>
+              <span class="pill deal" data-icn="play"><b id="next-deal">—</b></span>
+            </div>
+          </div>
+        </div>
+        <div class="hq-health own">
+          <label>YOUR HQ</label>
+          <div class="hpbar"><div class="fill"></div></div>
+        </div>
+        <div class="hq-health enemy">
+          <label>ENEMY HQ</label>
+          <div class="hpbar"><div class="fill"></div></div>
+        </div>
+        <div class="post-foot">
+          <button id="btn-mute" class="mute" title="Mute (M)"></button>
+          <button id="btn-deckview" class="hudbtn" title="View deck (D)">DECK</button>
+          <button id="btn-pausemenu" class="hudbtn" title="Menu (Esc)">MENU</button>
+        </div>
+      </div>
+
+      <div class="post tr" id="post-actions">
+        <div class="profile">
+          <span class="portrait" data-portrait="strategy"></span>
+          <div class="dossier">
+            <b>STRATEGY</b>
+            <span class="rank">COL. A. STERN</span>
+            <i>action proposals</i>
+          </div>
+          <button class="refresh" id="refresh-action" title="Discard these proposals; two fresh ones arrive. Each reissue adds +10 to the price; it cools back down over 10s." data-icn="gold">REISSUE <b class="cost">10</b></button>
+        </div>
+        <div class="desk" id="hand-action"></div>
+        <div id="order-status" class="hidden"></div>
+      </div>
+
+      <div class="post bl" id="post-build">
+        <div class="profile">
+          <span class="portrait" data-portrait="infra"></span>
+          <div class="dossier">
+            <b>INFRASTRUCTURE</b>
+            <span class="rank">CPT. R. MASON</span>
+            <i>building proposals</i>
+          </div>
+          <button class="refresh" id="refresh-building" title="Discard these proposals; two fresh ones arrive. Each reissue adds +10 to the price; it cools back down over 10s." data-icn="gold">REISSUE <b class="cost">10</b></button>
+        </div>
+        <div class="desk" id="hand-building"></div>
+      </div>
+
+      <div class="post br" id="post-units">
+        <div class="profile">
+          <span class="portrait" data-portrait="frontline"></span>
+          <div class="dossier">
+            <b>FRONTLINE</b>
+            <span class="rank">MAJ. D. KANE</span>
+            <i>unit proposals</i>
+          </div>
+          <button class="refresh" id="refresh-unit" title="Discard these proposals; two fresh ones arrive. Each reissue adds +10 to the price; it cools back down over 10s." data-icn="gold">REISSUE <b class="cost">10</b></button>
+        </div>
+        <div class="desk" id="hand-unit"></div>
+      </div>
+
+      <div id="warn" class="hidden"></div>
+      <div id="hint" class="hidden"></div>
+      <div id="toast"></div>
+    </div>
+
+    <div id="menu" class="screen">
+      <div class="lockup">
+        <svg class="emblem" viewBox="0 0 64 64" aria-hidden="true">
+          <polygon points="12,3 52,3 61,12 61,52 52,61 12,61 3,52 3,12" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <polygon points="32,12 46,26 39.5,26 32,18.5 24.5,26 18,26" fill="currentColor"/>
+          <polygon points="32,24 46,38 39.5,38 32,30.5 24.5,38 18,38" fill="currentColor" opacity="0.72"/>
+          <polygon points="32,36 46,50 39.5,50 32,42.5 24.5,50 18,50" fill="currentColor" opacity="0.45"/>
+        </svg>
+        <h1 class="title">FRONT<span>LINE</span></h1>
+        <div class="title-rule"></div>
+        <p class="tag">Command by card — the battlefield runs itself</p>
+      </div>
+      <div class="panel menu-box">
+        <button id="btn-campaign" class="primary big" data-icn="battle">CAMPAIGN</button>
+        <div id="campaign-status" class="dim small center"></div>
+        <button id="btn-tutorial" data-icn="play">TUTORIAL</button>
+        <div class="opt-title">SKIRMISH — OPPOSING COMMANDER</div>
+        <div id="enemy-select">
+          <label><input type="radio" name="enemy" value="standard" checked /><span>Standard<i>balanced doctrine</i></span></label>
+          <label><input type="radio" name="enemy" value="aggressive" /><span>Aggressor<i>infantry rush</i></span></label>
+          <label><input type="radio" name="enemy" value="turtle" /><span>Fortress<i>armor &amp; turrets</i></span></label>
+        </div>
+        <div class="btn-row">
+          <button id="btn-deploy" data-icn="chevR">SKIRMISH</button>
+          <button id="btn-loadout">LOADOUT</button>
+        </div>
+        <button id="btn-exit" class="hidden">EXIT GAME</button>
+      </div>
+      <div class="menu-foot">FRONTLINE 0.1 — ESC PAUSES — D DECK — M MUTES — 1–6 PLAY CARDS</div>
+    </div>
+
+    <div id="campaign" class="screen hidden">
+      <div class="camp-head">
+        <h2>OPERATION <span>SPEARPOINT</span></h2>
+        <div class="camp-stats">
+          <span id="camp-req" class="pill">⛁ 0</span>
+          <button id="btn-camp-deck">FORCE (<span id="camp-deck-count">0</span>)</button>
+          <button id="btn-camp-abandon">ABANDON</button>
+        </div>
+      </div>
+      <div id="cmap"></div>
+      <div id="camp-legend" class="camp-legend"></div>
+    </div>
+
+    <div id="loadout-editor" class="screen hidden">
+      <div class="editor-head">
+        <h2>LOADOUT <span id="deck-count">16 / 16</span></h2>
+        <div class="presets">
+          <button id="btn-preset-balanced">Balanced</button>
+          <button id="btn-preset-armor">Armor</button>
+          <button id="btn-preset-rush">Rush</button>
+        </div>
+      </div>
+      <div id="card-list"></div>
+      <div class="editor-foot">
+        <button id="btn-back-loadout">BACK</button>
+        <button id="btn-save-loadout" class="primary">SAVE LOADOUT</button>
+      </div>
+    </div>
+
+    <div id="end" class="screen hidden">
+      <h1 id="end-title" class="win">VICTORY</h1>
+      <div id="end-sub">FIELD REPORT</div>
+      <div id="end-stats" class="panel"></div>
+      <div class="end-buttons">
+        <button id="btn-again" class="primary" data-icn="chevR">RE-DEPLOY</button>
+        <button id="btn-menu">MAIN MENU</button>
+      </div>
+    </div>
+
+    <div id="pause" class="overlay hidden">
+      <div class="panel pause-box">
+        <h2>PAUSED</h2>
+        <button id="btn-resume" class="primary" data-icn="play">RESUME</button>
+        <button id="btn-pause-deck">VIEW DECK</button>
+        <button id="btn-pause-surrender">SURRENDER</button>
+        <div class="dim small center">ESC RESUMES · D VIEWS DECK · M MUTES</div>
+      </div>
+    </div>
+
+    <div id="deckview" class="overlay hidden">
+      <div class="panel deck-box">
+        <h2>YOUR DECK <span id="deckview-count" class="dim"></span></h2>
+        <div id="deckview-cards"></div>
+        <div class="modal-actions"><button id="btn-deckview-close" class="primary">CLOSE</button></div>
+      </div>
+    </div>
+
+    <div id="modal" class="hidden">
+      <div id="modal-body" class="panel"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

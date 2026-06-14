@@ -1,0 +1,30 @@
+{
+  "name": "frontline",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FRONTLINE - a card-driven modern-warfare RTS. Fluid deck, autonomous battlefield.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "app": "electron .",
+    "dist:win": "npm run build && electron-builder --win --config electron-builder.json"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@types/three": "^0.170.0",
+    "electron": "^41.7.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}

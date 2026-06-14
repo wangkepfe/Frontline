@@ -1,0 +1,16 @@
+{
+  "appId": "com.frontline.game",
+  "productName": "FRONTLINE",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*"
+  ],
+  "win": {
+    "target": [{ "target": "dir" }],
+    "artifactName": "${productName}-${version}-win",
+    "signAndEditExecutable": false
+  }
+}
