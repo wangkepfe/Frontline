@@ -8,6 +8,9 @@ import { GameView } from './render/view';
 import { Hud } from './ui/hud';
 import { icon } from './ui/icons';
 import { sfx, sfxForSimEvent } from './audio/sfx';
+import { LockstepNet } from './net/lockstep';
+import type { NetCommand } from './net/protocol';
+import type { Transport } from './net/transport';
 import type { CardRef, SimOptions, TeamId } from './sim/types';
 
 /** Tutorial hint: shows while `show` is true, retires permanently once `done`. */
@@ -31,12 +34,26 @@ export interface GameOptions {
   onEscape?: () => void;
   /** D — toggle the read-only deck inspector */
   onToggleDeck?: () => void;
+  /** the side this client commands (multiplayer joiner = 1). Default 0. */
+  localTeam?: TeamId;
+  /** present ⇒ networked multiplayer: input becomes lockstep commands over this
+   *  pipe instead of mutating the sim directly. The two peers must build the sim
+   *  from an identical seed/loadout/simOptions (the lobby guarantees this). */
+  transport?: Transport;
+  /** the two sims diverged mid-match (a bug or tampering) — unrecoverable. */
+  onDesync?: () => void;
+  /** the networked opponent disconnected. */
+  onPeerLeft?: () => void;
 }
 
 /** One match: owns the sim, the AI, the 3D view, input, and the frame loop. */
 export class Game {
   readonly sim: Sim;
+  readonly localTeam: TeamId;
   private ai: AiController | null;
+  /** lockstep driver in multiplayer; null in single-player */
+  private net: LockstepNet | null = null;
+  private netWaiting = false;
   private sceneCtx: SceneCtx;
   private view: GameView;
   private hud: Hud;
@@ -63,13 +80,27 @@ export class Game {
   stats = { cardsPlayed: 0, collects: 0 };
 
   constructor(private stage: HTMLElement, hud: Hud, private opts: GameOptions) {
+    this.localTeam = opts.localTeam ?? 0;
     this.sim = new Sim(opts.seed, [opts.playerLoadout, opts.aiLoadout ?? []], opts.simOptions);
-    this.ai = opts.aiProfile ? new AiController(1, opts.seed * 31 + 7, opts.aiProfile) : null;
-    this.sceneCtx = createScene(stage);
+    // no AI in multiplayer — both sides are human, the net carries their orders
+    this.ai = opts.aiProfile && !opts.transport ? new AiController(1, opts.seed * 31 + 7, opts.aiProfile) : null;
+    this.sceneCtx = createScene(stage, this.localTeam);
     this.view = new GameView(this.sceneCtx, this.sim);
     this.hud = hud;
+    this.hud.localTeam = this.localTeam;
     this.hud.onCardClick = (slot, ev) => this.onCardPress(slot, ev);
     this.hud.onRefresh = (cat) => this.refreshRegion(cat);
+
+    if (opts.transport) {
+      this.net = new LockstepNet(this.sim, this.localTeam, opts.transport, {
+        onApplyLocal: (cmd, result) => this.onNetApplied(cmd, result),
+        onDesync: () => {
+          this.hud.netStatus('CONNECTION DESYNCED');
+          this.opts.onDesync?.();
+        },
+        onClose: () => this.onPeerLeft()
+      });
+    }
     this.worldUi = document.getElementById('world-ui')!;
     this.worldUi.innerHTML = '';
 
@@ -126,13 +157,13 @@ export class Game {
       this.disarm();
       return;
     }
-    const p = this.sim.players[0];
+    const p = this.sim.players[this.localTeam];
     const hand = p.hand[slot];
     if (!hand) return;
     const card = CARDS[hand.card.id];
 
     // locked/unaffordable cards refuse to arm — say why instead of dangling a ghost
-    const pre = this.sim.canPlay(0, slot);
+    const pre = this.sim.canPlay(this.localTeam, slot);
     if (!pre.ok && pre.reason !== 'needs target') {
       this.hud.toast(reasonText(pre.reason));
       sfx.play('invalid');
@@ -141,19 +172,14 @@ export class Game {
 
     // untargeted and auto-placing cards play instantly — one click, no aiming
     if (card.place === 'none' || card.auto) {
-      const res = this.sim.playCard(0, slot);
-      if (res.ok) this.stats.cardsPlayed++;
-      else {
-        this.hud.toast(reasonText(res.reason));
-        sfx.play('invalid');
-      }
+      this.commitPlay(slot);
       this.disarm();
       return;
     }
     this.armedSlot = slot;
     this.hud.setArmed(slot);
     sfx.play('card_arm');
-    const tiles = validPlacementTiles(this.sim, 0, card);
+    const tiles = validPlacementTiles(this.sim, this.localTeam, card);
     this.view.setPlacementTiles(card.place === 'anywhere' ? null : tiles);
     this.view.setGhost(card);
     if (ev) {
@@ -176,7 +202,7 @@ export class Game {
 
   private armedCard() {
     if (this.armedSlot < 0) return null;
-    const hand = this.sim.players[0].hand[this.armedSlot];
+    const hand = this.sim.players[this.localTeam].hand[this.armedSlot];
     return hand ? CARDS[hand.card.id] : null;
   }
 
@@ -189,7 +215,7 @@ export class Game {
       this.view.setHover(null, false);
       return;
     }
-    this.view.setHover(tile, isValidPlacement(this.sim, 0, card, tile.c, tile.r));
+    this.view.setHover(tile, isValidPlacement(this.sim, this.localTeam, card, tile.c, tile.r));
   }
 
   private onWindowUp(ev: PointerEvent): void {
@@ -213,14 +239,53 @@ export class Game {
   }
 
   private tryPlace(tile: { c: number; r: number }): void {
-    const res = this.sim.playCard(0, this.armedSlot, tile);
-    if (res.ok) {
-      this.stats.cardsPlayed++;
-      this.disarm();
-    } else {
-      this.hud.toast(reasonText(res.reason));
+    if (this.commitPlay(this.armedSlot, tile)) this.disarm();
+  }
+
+  /**
+   * Play a card for the local team. Single-player mutates the sim directly;
+   * multiplayer pre-validates for instant UI feedback, then submits a lockstep
+   * command that executes (on BOTH peers) a few ticks later. Returns whether the
+   * action was accepted (so the caller can disarm).
+   */
+  private commitPlay(slot: number, tile?: { c: number; r: number }): boolean {
+    const check = this.sim.canPlay(this.localTeam, slot, tile);
+    if (!check.ok) {
+      this.hud.toast(reasonText(check.reason));
       sfx.play('invalid');
+      return false;
     }
+    const cmd: NetCommand = { k: 'play', team: this.localTeam, slot, ...(tile ? { tile } : {}) };
+    if (this.net) {
+      this.net.submitLocal(cmd);
+    } else {
+      this.sim.playCard(this.localTeam, slot, tile);
+      this.stats.cardsPlayed++;
+    }
+    return true;
+  }
+
+  /** local-team command just executed in the sim (multiplayer) — fire UI cues */
+  private onNetApplied(cmd: NetCommand, result: unknown): void {
+    if (cmd.k === 'play') {
+      if ((result as { ok?: boolean } | null)?.ok) this.stats.cardsPlayed++;
+      return;
+    }
+    if (cmd.k === 'collect') {
+      const claim = result as { kind: 'gold' | 'oil'; amount: number } | null;
+      if (!claim) return;
+      this.stats.collects++;
+      const b = this.sim.buildings.find((x) => x.id === cmd.id);
+      const rect = b ? (() => { const px = this.view.projectTile(b.tile); return new DOMRect(px.x - 20, px.y - 30, 40, 20); })() : null;
+      this.hud.flyResources(claim.kind, claim.amount, rect);
+      sfx.play('collect');
+    }
+  }
+
+  private onPeerLeft(): void {
+    if (this.ended || this.disposed) return;
+    this.hud.netStatus(null);
+    this.opts.onPeerLeft?.();
   }
 
   private onKey(ev: KeyboardEvent): void {
@@ -242,7 +307,21 @@ export class Game {
   /** paid desk refresh (the corner buttons): discard + redeal that desk */
   refreshRegion(cat: HandCategory): void {
     if (this.ended) return;
-    const res = this.sim.refreshRegion(0, cat);
+    if (this.net) {
+      // pre-check affordability for instant feedback; the discard + redeal lands
+      // on both peers when the command executes
+      const p = this.sim.players[this.localTeam];
+      if (p.gold < this.sim.refreshCost(this.localTeam, cat)) {
+        this.hud.toast(reasonText('resources'));
+        sfx.play('invalid');
+        return;
+      }
+      this.net.submitLocal({ k: 'refresh', team: this.localTeam, cat });
+      this.disarm();
+      sfx.play('card_arm');
+      return;
+    }
+    const res = this.sim.refreshRegion(this.localTeam, cat);
     if (res.ok) {
       this.disarm();
       sfx.play('card_arm');
@@ -269,13 +348,19 @@ export class Game {
     if (this.ended || this.disposed) return;
     this.ended = true;
     this.disarm();
-    this.opts.onEnd(1, this.sim);
+    this.net?.close('surrender'); // tell the opponent so their match resolves too
+    this.opts.onEnd(this.localTeam === 0 ? 1 : 0, this.sim);
   }
 
   private collectBuilding(buildingId: number): void {
+    if (this.net) {
+      // the bank + fly-chips happen when the command executes (onNetApplied)
+      this.net.submitLocal({ k: 'collect', team: this.localTeam, id: buildingId });
+      return;
+    }
     const badge = this.badges.get(buildingId);
     const fromRect = badge?.root.getBoundingClientRect() ?? null;
-    const claim = this.sim.collectBuilding(0, buildingId);
+    const claim = this.sim.collectBuilding(this.localTeam, buildingId);
     if (claim) {
       this.stats.collects++;
       this.hud.flyResources(claim.kind, claim.amount, fromRect);
@@ -288,7 +373,7 @@ export class Game {
     const live = new Set<number>();
     if (this.sim.rules.manualCollect && !this.ended) {
       for (const b of this.sim.buildings) {
-        if (b.team !== 0 || b.hp <= 0) continue;
+        if (b.team !== this.localTeam || b.hp <= 0) continue;
         if (b.kind !== 'extractor' && b.kind !== 'derrick') continue;
         const isGold = b.kind === 'extractor';
         const cap = isGold ? STORE_CAP_GOLD : STORE_CAP_OIL;
@@ -328,7 +413,7 @@ export class Game {
     const dark = new Set<number>();
     if (this.sim.rules.tech && !this.ended) {
       for (const b of this.sim.buildings) {
-        if (b.team !== 0 || b.hp <= 0 || b.powered) continue;
+        if (b.team !== this.localTeam || b.hp <= 0 || b.powered) continue;
         dark.add(b.id);
         let badge = this.powerBadges.get(b.id);
         if (!badge) {
@@ -382,6 +467,19 @@ export class Game {
 
     if (this.paused) {
       this.acc = 0; // drop time spent in the menu — no catch-up burst on resume
+    } else if (this.net) {
+      // lockstep: only advance ticks we hold both peers' commands for. If the
+      // peer falls behind we stall here (and say so) rather than racing ahead.
+      while (this.acc >= TICK_DT && this.net.canStep()) {
+        this.net.step();
+        this.acc -= TICK_DT;
+      }
+      const waiting = this.acc >= TICK_DT && !this.net.canStep() && !this.sim.result && !this.net.isClosed;
+      if (waiting !== this.netWaiting) {
+        this.netWaiting = waiting;
+        this.hud.netStatus(waiting ? 'WAITING FOR OPPONENT…' : null);
+      }
+      if (this.acc > 1) this.acc = 1; // bound the catch-up burst after a stall
     } else {
       while (this.acc >= TICK_DT) {
         this.ai?.update(this.sim, TICK_DT);
@@ -395,7 +493,7 @@ export class Game {
     for (const e of events) {
       sfxForSimEvent(e);
       // supply truck banked a silo: same fly-chips as a manual collect
-      if (e.t === 'truckCollect' && e.team === 0) {
+      if (e.t === 'truckCollect' && e.team === this.localTeam) {
         const b = this.sim.buildings.find((x) => x.id === e.id);
         if (b) {
           const px = this.view.projectTile(b.tile);
@@ -412,7 +510,7 @@ export class Game {
     this.prevSimTime = this.sim.time;
 
     // armed card may have expired or been consumed
-    if (this.armedSlot >= 0 && !this.sim.players[0].hand[this.armedSlot]) {
+    if (this.armedSlot >= 0 && !this.sim.players[this.localTeam].hand[this.armedSlot]) {
       this.disarm();
     }
 
@@ -454,6 +552,8 @@ export class Game {
 
   dispose(): void {
     this.disposed = true;
+    this.net?.close(); // notify the opponent we're leaving, then drop the pipe
+    this.hud.netStatus(null);
     cancelAnimationFrame(this.raf);
     clearInterval(this.watchdog);
     for (const off of this.listeners) off();

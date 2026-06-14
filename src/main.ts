@@ -17,6 +17,10 @@ import {
 } from './ui/campaignUi';
 import { cardFaceHtml } from './ui/cardFace';
 import { cardIcon, icon } from './ui/icons';
+import { ElectronTransport, netBridge } from './net/electronTransport';
+import { hostSession, joinSession, type SessionResult } from './net/session';
+import type { Transport } from './net/transport';
+import type { TeamId } from './sim/types';
 
 // declarative icon slots: <el data-icn="name"> gets its glyph at boot
 for (const el of document.querySelectorAll<HTMLElement>('[data-icn]')) {
@@ -86,7 +90,7 @@ function showPauseMenu(): void {
 
 /** read-only mid-battle deck list — A/B sides flip only in the campaign loadout phase */
 function renderDeckView(): void {
-  const loadout = game!.sim.players[0].loadout;
+  const loadout = game!.sim.players[game!.localTeam].loadout;
   const tierRank = (t: CardTier): number => (t === 'base' ? -1 : t);
   const sorted = [...loadout].sort((a, b) => {
     const da = CARDS[a.id], db = CARDS[b.id];
@@ -421,6 +425,195 @@ document.getElementById('btn-campaign')!.addEventListener('click', () => {
   }
   showCampaign();
 });
+
+// ── multiplayer (local network) ──────────────────────────────────────────────
+
+const MP_PORT = 47615;
+
+function mpStatus(html: string): void {
+  const el = document.getElementById('mp-status');
+  if (el) el.innerHTML = html;
+}
+
+function showMultiplayerLobby(): void {
+  if (!netBridge()) {
+    const body = openModal(`
+      <h2>${icon('battle')} MULTIPLAYER</h2>
+      <p class="event-desc">Local-network multiplayer runs in the FRONTLINE desktop app. Launch the installed game (not a browser) to host or join a LAN match.</p>
+      <div class="modal-actions"><button id="m-close" class="primary">BACK</button></div>
+    `);
+    body.querySelector('#m-close')!.addEventListener('click', closeModal);
+    return;
+  }
+  const body = openModal(`
+    <h2>${icon('battle')} LOCAL MULTIPLAYER</h2>
+    <p class="event-desc">Two commanders on one network. One hosts; the other joins by IP. Each brings their own SKIRMISH loadout.</p>
+    <div class="modal-actions vertical">
+      <button id="mp-host" class="primary">HOST GAME</button>
+      <button id="mp-join">JOIN GAME</button>
+      <button id="mp-cancel">BACK</button>
+    </div>
+    <div id="mp-status" class="dim small center"></div>
+  `);
+  body.querySelector('#mp-host')!.addEventListener('click', startHost);
+  body.querySelector('#mp-join')!.addEventListener('click', showJoinForm);
+  body.querySelector('#mp-cancel')!.addEventListener('click', () => {
+    netBridge()?.close();
+    closeModal();
+  });
+}
+
+async function startHost(): Promise<void> {
+  const bridge = netBridge();
+  if (!bridge) return;
+  mpStatus('Starting host…');
+  let transport: Transport;
+  try {
+    transport = new ElectronTransport();
+  } catch (e) {
+    mpStatus(`Host failed: ${String(e)}`);
+    return;
+  }
+  let res: { ok: boolean; error?: string };
+  try {
+    res = await bridge.host(MP_PORT);
+  } catch (e) {
+    mpStatus(`Host failed: ${String(e)}`);
+    return;
+  }
+  if (!res.ok) {
+    mpStatus(`Host failed: ${res.error ?? 'unknown error'}`);
+    return;
+  }
+  const ips = await bridge.ips();
+  const addr = ips.length ? ips.join(' / ') : 'localhost';
+  mpStatus(`Listening on <b>${addr}</b> port <b>${MP_PORT}</b><br/>Have the other player JOIN this address. Waiting…`);
+  try {
+    const result = await hostSession(transport, loadLoadout(), freshSeed());
+    startNetGame(transport, result);
+  } catch (e) {
+    mpStatus(`Host error: ${String(e)}`);
+  }
+}
+
+function showJoinForm(): void {
+  const body = openModal(`
+    <h2>${icon('battle')} JOIN GAME</h2>
+    <p class="event-desc">Enter the host's address (shown on their screen).</p>
+    <div class="mp-form">
+      <input id="mp-ip" type="text" placeholder="192.168.1.50" autocomplete="off" spellcheck="false" />
+      <span class="mp-colon">:</span>
+      <input id="mp-port" type="text" value="${MP_PORT}" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="modal-actions">
+      <button id="mp-back">BACK</button>
+      <button id="mp-connect" class="primary">CONNECT</button>
+    </div>
+    <div id="mp-status" class="dim small center"></div>
+  `);
+  body.querySelector('#mp-back')!.addEventListener('click', showMultiplayerLobby);
+  body.querySelector('#mp-connect')!.addEventListener('click', startJoin);
+  (body.querySelector('#mp-ip') as HTMLInputElement | null)?.focus();
+}
+
+async function startJoin(): Promise<void> {
+  const bridge = netBridge();
+  if (!bridge) return;
+  const ip = (document.getElementById('mp-ip') as HTMLInputElement).value.trim() || '127.0.0.1';
+  const port = parseInt((document.getElementById('mp-port') as HTMLInputElement).value, 10) || MP_PORT;
+  mpStatus('Connecting…');
+  let transport: Transport;
+  try {
+    transport = new ElectronTransport();
+  } catch (e) {
+    mpStatus(`Connect failed: ${String(e)}`);
+    return;
+  }
+  let res: { ok: boolean; error?: string };
+  try {
+    res = await bridge.join(ip, port);
+  } catch (e) {
+    mpStatus(`Connect failed: ${String(e)}`);
+    return;
+  }
+  if (!res.ok) {
+    mpStatus(`Connect failed: ${res.error ?? 'unknown error'}`);
+    return;
+  }
+  mpStatus('Connected — syncing match…');
+  try {
+    const result = await joinSession(transport, loadLoadout());
+    startNetGame(transport, result);
+  } catch (e) {
+    mpStatus(`Sync error: ${String(e)}`);
+  }
+}
+
+function startNetGame(transport: Transport, result: SessionResult): void {
+  killMatch();
+  closeModal();
+  menuEl.classList.add('hidden');
+  endEl.classList.add('hidden');
+  hud.show();
+  const localTeam = result.localTeam;
+  game = new Game(stage, hud, {
+    seed: result.seed,
+    playerLoadout: result.loadouts[0],
+    aiLoadout: result.loadouts[1],
+    localTeam,
+    transport,
+    simOptions: {
+      mapLayout: result.map,
+      rules: { manualCollect: result.manualCollect, humanTeams: [true, true] }
+    },
+    onEnd: (winner) => showMpEnd(winner, localTeam),
+    onPeerLeft: onMpPeerLeft,
+    onDesync: onMpDesync,
+    ...battleUiOptions()
+  });
+}
+
+function showMpEnd(winner: TeamId, localTeam: TeamId): void {
+  const win = winner === localTeam;
+  const title = document.getElementById('end-title')!;
+  title.textContent = win ? 'VICTORY' : 'DEFEAT';
+  title.className = win ? 'win' : 'loss';
+  const sim = game!.sim;
+  const m = Math.floor(sim.time / 60);
+  const s = Math.floor(sim.time % 60);
+  const other: TeamId = localTeam === 0 ? 1 : 0;
+  document.getElementById('end-stats')!.innerHTML = `
+    <div><span>Battle length</span><b>${m}:${s.toString().padStart(2, '0')}</b></div>
+    <div><span>Damage dealt</span><b>${Math.round(sim.players[localTeam].damageDealt)}</b></div>
+    <div><span>Damage taken</span><b>${Math.round(sim.players[other].damageDealt)}</b></div>
+  `;
+  killMatch();
+  endEl.classList.remove('hidden');
+}
+
+function mpResultModal(titleClass: string, head: string, body: string): void {
+  killMatch();
+  const el = openModal(`
+    <h2 class="${titleClass}">${head}</h2>
+    <p class="event-desc">${body}</p>
+    <div class="modal-actions"><button id="m-menu" class="primary">MAIN MENU</button></div>
+  `);
+  el.querySelector('#m-menu')!.addEventListener('click', () => {
+    closeModal();
+    showMenu();
+  });
+}
+
+function onMpPeerLeft(): void {
+  if (!game || game.isEnded) return; // a clean result resolves itself
+  mpResultModal('win', `${icon('star')} OPPONENT LEFT`, 'The other commander disconnected. The field is yours.');
+}
+
+function onMpDesync(): void {
+  mpResultModal('loss', `${icon('x')} CONNECTION DESYNCED`, 'The two games fell out of sync and the match was aborted.');
+}
+
+document.getElementById('btn-multiplayer')!.addEventListener('click', showMultiplayerLobby);
 
 // ── skirmish loadout editor ─────────────────────────────────────────────────
 

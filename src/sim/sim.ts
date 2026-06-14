@@ -60,6 +60,7 @@ export class Sim {
       incomeMult: [1, 1],
       tech: true,
       hqGun: true,
+      humanTeams: [true, false],
       ...opts.rules
     };
     this.waves = [...(opts.waves ?? [])].sort((a, b) => a.t - b.t);
@@ -563,8 +564,9 @@ export class Sim {
       const boost = b.boostTimer > 0 ? b.boostMult : 1;
       // HQ trickle always banks directly; under the manual-collect rule each
       // human extractor/derrick pools its production until clicked — and a full
-      // silo stops producing, so ignoring your mines has a price
-      const manual = this.rules.manualCollect && b.team === 0;
+      // silo stops producing, so ignoring your mines has a price. AI teams always
+      // auto-bank (they can't click), so manual-collect only gates human teams.
+      const manual = this.rules.manualCollect && this.rules.humanTeams[b.team];
       if (b.kind === 'hq') {
         p.gold += HQ_INCOME_GOLD * mult * dt;
       } else if (b.kind === 'extractor') {

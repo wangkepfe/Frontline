@@ -4,6 +4,10 @@ export class Rng {
   constructor(seed: number) {
     this.s = seed >>> 0;
   }
+  /** Raw internal state — folded into desync checksums and (future) replays. */
+  get state(): number {
+    return this.s >>> 0;
+  }
   /** float in [0, 1) */
   next(): number {
     let t = (this.s += 0x6d2b79f5);

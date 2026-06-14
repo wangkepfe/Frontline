@@ -1,6 +1,15 @@
 // FRONTLINE desktop shell — loads the built game for the Steam distribution.
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
+const { NetLink } = require('./net.cjs');
+
+// LAN multiplayer link (src/net drives this over the preload bridge)
+const link = new NetLink();
+ipcMain.handle('net:host', (_e, port) => link.host(port));
+ipcMain.handle('net:join', (_e, host, port) => link.join(host, port));
+ipcMain.handle('net:ips', () => link.ips());
+ipcMain.on('net:send', (_e, data) => link.send(data));
+ipcMain.on('net:close', () => link.close());
 
 // Steamworks integration point:
 // 1. npm i steamworks.js
@@ -21,12 +30,14 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
       // the game loads ONLY local bundled content; this lets fetch() read the
       // bundled sfx/*.ogg sample files under the file:// protocol
       webSecurity: false
     }
   });
   win.removeMenu();
+  link.attach(win);
   win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 }
 
@@ -38,5 +49,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  link.close(); // release the LAN port
   app.quit();
 });

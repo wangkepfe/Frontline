@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "app": "electron .",
+    "mp:smoke": "npm run build && node electron/mp-smoke-run.cjs",
     "dist:win": "npm run build && electron-builder --win --config electron-builder.json"
   },
   "dependencies": {

@@ -181,6 +181,10 @@ export interface SimRules {
   tech: boolean;
   /** the HQ defends itself with its gun. Off for early scripted tutorials. */
   hqGun: boolean;
+  /** which teams are human-commanded. Manual collection only applies to a human
+   *  team (an AI can't click its mines); defaults to [player, AI]. Multiplayer
+   *  sets both true so the manual-collect economy stays symmetric and fair. */
+  humanTeams: [boolean, boolean];
 }
 
 export interface SimStart {

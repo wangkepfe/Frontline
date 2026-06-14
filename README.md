@@ -40,6 +40,12 @@ drag onto the battlefield) and collect resources. That's the whole interface.**
 - **Tutorial** — five short missions that introduce one system each, PvZ-style:
   real battles, minimal text, state-triggered hints.
 - **Skirmish** — single battle vs an AI commander with a 16-card loadout editor.
+- **Multiplayer (LAN)** — 1v1 over a local network in the desktop app. One player
+  hosts (their screen shows the address); the other joins by IP. Each brings their
+  own skirmish loadout, and the board orients to each commander's own HQ. Runs on
+  **deterministic lockstep**: only card plays / collects / reissues cross the wire
+  (a few bytes per action), both peers run the identical sim, and a rolling state
+  checksum is traded to catch any divergence instantly. No server, no accounts.
 
 ## Run it
 
@@ -48,8 +54,14 @@ npm install
 npm run dev        # play in the browser (Vite, http://localhost:5173)
 npm test           # headless sim suite incl. full AI-vs-AI matches
 npm run app        # run the desktop (Electron) shell against dist/ (run build first)
+npm run mp:smoke   # live two-process LAN multiplayer smoke test (builds, hosts+joins)
 npm run dist:win   # Windows build for Steam -> release/win-unpacked/
 ```
+
+Multiplayer is desktop-only (it needs the Electron LAN sockets). To play across two
+machines: launch the app on both, one picks **MULTIPLAYER (LAN) → HOST GAME** and
+reads out the shown address, the other picks **JOIN GAME** and types it in. Default
+port is `47615`. For a quick local test, host on one window and join `127.0.0.1`.
 
 Balance lab (90 AI-vs-AI matches with win-rate grid):
 PowerShell: `$env:BALANCE='1'; npx vitest run tests/balance.lab.test.ts`
@@ -64,15 +76,24 @@ src/sim/      deterministic 20 Hz fixed-step simulation — zero rendering deps
   behavior.ts   autonomous unit/building behavior scripts
   ai.ts         the AI opponent (plays cards through the same API) + headless runner
   sim.ts        orchestrator: economy, hands, combat, escalation, win/loss
+net/          deterministic-lockstep multiplayer
+  protocol.ts   the tiny command schema (play / collect / reissue) + wire messages
+  lockstep.ts   the tick engine: input-delay scheduling, command ordering, checksums
+  checksum.ts   full state snapshot + 32-bit fingerprint for desync detection
+  transport.ts  Transport interface, line framing, in-memory loopback (for tests)
+  session.ts    host/join lobby handshake (agree on seed, map, loadouts, sides)
 render/       Three.js layer: procedural low-poly meshes, FX, fixed iso camera
 ui/           DOM HUD: card hand with TTL rings, resources, screens
 game.ts       match loop: fixed-step sim + interpolated render + input
-electron/     desktop shell for the Steam build (see steam.md)
+electron/     desktop shell for the Steam build (net.cjs = LAN TCP link; see steam.md)
 ```
 
 The sim is seeded and deterministic: same seed + same inputs = identical match.
-That makes headless testing, balance batches, replays, and future lockstep
-multiplayer all possible. The renderer consumes sim events and never mutates state.
+That makes headless testing, balance batches, replays, and **lockstep multiplayer**
+(`src/net/`) all possible. The renderer consumes sim events and never mutates state.
+The netcode is exercised by `tests/net.test.ts` / `tests/netlink.test.ts`: two peers
+driven over an in-memory loopback, over a real TCP socket, and through the Electron
+main-process link — asserted byte-identical at every tick.
 
 ## Audio
 

@@ -19,7 +19,7 @@ export interface SceneCtx {
   resize: () => void;
 }
 
-export function createScene(container: HTMLElement): SceneCtx {
+export function createScene(container: HTMLElement, viewTeam: 0 | 1 = 0): SceneCtx {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
@@ -27,10 +27,13 @@ export function createScene(container: HTMLElement): SceneCtx {
   const scene = new THREE.Scene();
   studio(renderer, scene, CENTER, 13);
 
-  // camera southwest of center, looking northeast: player HQ reads at the bottom
+  // camera southwest of center, looking northeast: the local commander's HQ reads
+  // at the bottom. The joiner (team 1) flips to the northeast corner so the board
+  // is oriented from THEIR side — the diamond is symmetric, so the fit is unchanged.
+  const flip = viewTeam === 1 ? -1 : 1;
   const pitch = THREE.MathUtils.degToRad(36);
   const dist = 26;
-  const dir = new THREE.Vector3(-Math.cos(pitch) * Math.SQRT1_2, Math.sin(pitch), Math.cos(pitch) * Math.SQRT1_2);
+  const dir = new THREE.Vector3(flip * -Math.cos(pitch) * Math.SQRT1_2, Math.sin(pitch), flip * Math.cos(pitch) * Math.SQRT1_2);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
   camera.position.copy(CENTER).addScaledVector(dir, dist);
   camera.lookAt(CENTER);

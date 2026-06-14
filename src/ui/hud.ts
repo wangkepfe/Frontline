@@ -4,7 +4,7 @@ import { BUILDING_STATS, ESCALATE_DRAW_T, HAND_SIZE, NUKE_UNLOCK_T, ORDER_DURATI
 import { renderCardFaceInto } from './cardFace';
 import { icon } from './icons';
 import { OfficerRole, officerPortrait } from './officers';
-import type { OrderKind } from '../sim/types';
+import type { OrderKind, TeamId } from '../sim/types';
 
 const ORDER_LABELS: Record<OrderKind, string> = {
   defend: 'DEFENSIVE POSTURE',
@@ -22,6 +22,9 @@ const ORDER_LABELS: Record<OrderKind, string> = {
 export class Hud {
   onCardClick: (slot: number, ev?: PointerEvent) => void = () => {};
   onRefresh: (cat: HandCategory) => void = () => {};
+  /** which side this client commands — the HUD always shows the local team's
+   *  hand, resources and grid. 0 in single-player; 1 for the multiplayer joiner. */
+  localTeam: TeamId = 0;
 
   private root: HTMLElement;
   private slots: HTMLElement[] = [];
@@ -86,6 +89,18 @@ export class Hud {
     }
   }
 
+  /** Multiplayer link banner: stalled-on-peer notice, desync/disconnect alert. */
+  netStatus(text: string | null): void {
+    const el = document.getElementById('netwait');
+    if (!el) return;
+    if (text) {
+      el.textContent = text;
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  }
+
   showHint(text: string | null): void {
     if (text === this.hintText) return;
     this.hintText = text;
@@ -146,12 +161,13 @@ export class Hud {
   }
 
   update(sim: Sim, dtFrame: number): void {
-    const p = sim.players[0];
+    const team = this.localTeam;
+    const p = sim.players[team];
     const tech = sim.rules.tech;
     const live = {
-      powerplant: tech && sim.hasLiveBuilding(0, 'powerplant'),
-      extractor: tech && sim.hasLiveBuilding(0, 'extractor'),
-      derrick: tech && sim.hasLiveBuilding(0, 'derrick')
+      powerplant: tech && sim.hasLiveBuilding(team, 'powerplant'),
+      extractor: tech && sim.hasLiveBuilding(team, 'extractor'),
+      derrick: tech && sim.hasLiveBuilding(team, 'derrick')
     };
 
     // desks
@@ -195,7 +211,7 @@ export class Hud {
     // desk refresh buttons price in live: base cost plus every still-cooling
     // click surcharge; hot-priced while surged, disabled without the gold
     for (const [cat, btn] of this.refreshBtns) {
-      const cost = sim.refreshCost(0, cat);
+      const cost = sim.refreshCost(team, cat);
       btn.disabled = p.gold < cost;
       btn.classList.toggle('surged', cost > REFRESH_COST);
       const costEl = this.refreshCosts.get(cat);
@@ -221,7 +237,7 @@ export class Hud {
       if (tech) {
         let cap = 0, demand = 0;
         for (const b of sim.buildings) {
-          if (b.team !== 0 || b.hp <= 0) continue;
+          if (b.team !== team || b.hp <= 0) continue;
           const pw = BUILDING_STATS[b.kind].power;
           if (pw > 0) cap += pw;
           else if (!b.freePower) demand += -pw;
@@ -275,9 +291,10 @@ export class Hud {
       warn.classList.add('hidden');
     }
 
-    for (const team of [0, 1] as const) {
-      const hq = sim.hqOf(team);
-      const bar = document.querySelector(`.hq-health.${team === 0 ? 'own' : 'enemy'} .fill`) as HTMLElement | null;
+    for (const side of ['own', 'enemy'] as const) {
+      const t = side === 'own' ? team : (team === 0 ? 1 : 0);
+      const hq = sim.hqOf(t);
+      const bar = document.querySelector(`.hq-health.${side} .fill`) as HTMLElement | null;
       if (bar) bar.style.width = `${hq ? Math.max(0, (hq.hp / hq.maxHp) * 100) : 0}%`;
     }
 
