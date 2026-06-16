@@ -7,6 +7,10 @@ import { LOADOUT_SIZE } from './sim/stats';
 import type { Sim } from './sim/sim';
 import { MISSIONS, completeTutorial, tutorialProgress, Mission } from './tutorial';
 import { generateMap } from './sim/mapgen';
+import {
+  buildTuning, diffLabel, gradeMatch, loadRecord, MUTATORS, paintMinimap, recordMatch,
+  type SkirmishConfig
+} from './skirmish';
 import { sfx } from './audio/sfx';
 import {
   RunState, advanceAct, clearRun, isFinalBoss, loadRun, newRun, nodeById, saveRun, battleOptions
@@ -192,6 +196,7 @@ function showMenu(): void {
   const prog = tutorialProgress();
   document.getElementById('btn-tutorial')!.innerHTML =
     `${icon('play')} TUTORIAL ${prog >= MISSIONS.length ? '(COMPLETE)' : `(${prog}/${MISSIONS.length})`}`;
+  renderRecord();
 }
 
 // ── skirmish ────────────────────────────────────────────────────────────────
@@ -224,21 +229,19 @@ const ENEMY_CONFIG: Record<string, { loadout: string[]; playstyle: AiPlaystyle }
   turtle: { loadout: AI_LOADOUTS.armor, playstyle: 'armor' }
 };
 
+// briefing-room flavor for each opposing commander
+const ENEMY_META: Record<string, { name: string; desc: string }> = {
+  standard: { name: 'BALANCED COMMAND', desc: 'combined arms' },
+  aggressive: { name: 'THE AGGRESSOR', desc: 'infantry rush' },
+  turtle: { name: 'THE FORTRESS', desc: 'armor & turrets' }
+};
+
 function aiDifficulty(): number {
   const el = document.getElementById('ai-difficulty') as HTMLInputElement | null;
   return (el ? parseInt(el.value, 10) : 65) / 100;
 }
 
-function diffLabel(d: number): string {
-  return d < 0.22 ? 'Recruit' : d < 0.45 ? 'Trained' : d < 0.72 ? 'Veteran' : d < 0.9 ? 'Elite' : 'Legendary';
-}
-
-function selectedEnemy(): { loadout: string[]; profile: AiProfile } {
-  const checked = document.querySelector('input[name="enemy"]:checked') as HTMLInputElement | null;
-  const cfg = ENEMY_CONFIG[checked?.value ?? 'standard'];
-  return { loadout: cfg.loadout, profile: profileFromDifficulty(aiDifficulty(), cfg.playstyle) };
-}
-
+// difficulty slider label tracks the shared scale (also used in the briefing)
 {
   const slider = document.getElementById('ai-difficulty') as HTMLInputElement | null;
   const label = document.getElementById('diff-label');
@@ -247,41 +250,199 @@ function selectedEnemy(): { loadout: string[]; profile: AiProfile } {
   sync();
 }
 
-function startSkirmish(): void {
+// ── match modifiers: composable toggle chips ──
+const selectedMutators = new Set<string>();
+{
+  const host = document.getElementById('mutator-select');
+  if (host) {
+    host.innerHTML = MUTATORS.map(
+      (m) => `<button class="mut-chip" data-mut="${m.id}" title="${m.blurb}">${icon(m.icon)}<span>${m.name}</span></button>`
+    ).join('');
+    host.querySelectorAll<HTMLButtonElement>('.mut-chip').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.mut!;
+        if (selectedMutators.has(id)) selectedMutators.delete(id);
+        else selectedMutators.add(id);
+        btn.classList.toggle('on', selectedMutators.has(id));
+      });
+    });
+  }
+}
+
+// ── service record (persistent across sessions) ──
+function fmtClock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function renderRecord(): void {
+  const el = document.getElementById('skirmish-record');
+  if (!el) return;
+  const rec = loadRecord();
+  if (rec.matches === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  const winPct = Math.round((rec.wins / rec.matches) * 100);
+  const stat = (value: string, label: string, hot = false) =>
+    `<div class="rec-stat"><b class="${hot ? 'hot' : ''}">${value}</b><span>${label}</span></div>`;
+  el.innerHTML = [
+    stat(`${rec.wins}–${rec.losses}`, 'Win–Loss'),
+    stat(`${winPct}%`, 'Win rate'),
+    stat(String(rec.streak), 'Streak', rec.streak >= 3),
+    stat(String(rec.bestStreak), 'Best'),
+    stat(rec.fastestWin > 0 ? fmtClock(rec.fastestWin) : '—', 'Fastest')
+  ].join('');
+  el.classList.remove('hidden');
+}
+
+// ── launch + pre-deploy briefing ──
+interface SkirmishSetup { enemyValue: string; difficulty: number; mutators: Set<string> }
+let lastSkirmish: { setup: SkirmishSetup; seed: number } | null = null;
+
+function readMenuSetup(): SkirmishSetup {
+  const checked = document.querySelector('input[name="enemy"]:checked') as HTMLInputElement | null;
+  return { enemyValue: checked?.value ?? 'standard', difficulty: aiDifficulty(), mutators: new Set(selectedMutators) };
+}
+
+function seedTag(seed: number): string {
+  return `#${(seed & 0xffff).toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+/** Pre-deploy briefing: preview the generated battlefield, the opponent and the
+ *  active modifiers — and reroll the map if the layout looks unfair before
+ *  committing (a player-side answer to the map lottery). */
+function openBriefing(setup: SkirmishSetup, seed: number): void {
+  const layout = generateMap(seed);
+  const meta = ENEMY_META[setup.enemyValue] ?? ENEMY_META.standard;
+  const tuning = buildTuning({ difficulty: setup.difficulty, mutators: setup.mutators } as SkirmishConfig);
+  const aiSupply = Math.round(tuning.incomeMult[1] * 100);
+  const mods = MUTATORS.filter((m) => setup.mutators.has(m.id));
+  const modRows = mods.length
+    ? mods.map((m) => `<span class="intel-chip mod">${icon(m.icon)} ${m.name}</span>`).join('')
+    : '<span class="dim small">Standard rules</span>';
+  const body = openModal(`
+    <h2>${icon('battle')} SKIRMISH BRIEFING</h2>
+    <div class="preview-grid">
+      <div>
+        <canvas id="minimap" width="220" height="220"></canvas>
+        <div class="dim small center">Battlefield ${seedTag(seed)}</div>
+      </div>
+      <div class="intel">
+        <div class="intel-name">${meta.name}</div>
+        <div class="dim small">${meta.desc} · ${diffLabel(setup.difficulty)} commander</div>
+        <div class="dim small">Enemy supply rate: <b style="color:var(--ink-hi)">${aiSupply}%</b></div>
+        <div class="brief-mods">${modRows}</div>
+        <div class="dim small">Your force: ${loadLoadout().length} cards</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="m-cancel">BACK</button>
+      <button id="m-reroll" data-icn="play">NEW MAP</button>
+      <button id="m-deploy" class="primary">${icon('chevR')} DEPLOY</button>
+    </div>
+  `);
+  paintMinimap(body.querySelector('#minimap') as HTMLCanvasElement, layout);
+  body.querySelector('#m-cancel')!.addEventListener('click', closeModal);
+  body.querySelector('#m-reroll')!.addEventListener('click', () => openBriefing(setup, freshSeed()));
+  body.querySelector('#m-deploy')!.addEventListener('click', () => {
+    closeModal();
+    launchSkirmish(setup, seed);
+  });
+}
+
+function launchSkirmish(setup: SkirmishSetup, seed: number): void {
   killMatch();
   menuEl.classList.add('hidden');
   endEl.classList.add('hidden');
   hud.show();
-  const enemy = selectedEnemy();
-  const seed = freshSeed();
+  lastSkirmish = { setup, seed };
+  const cfg = ENEMY_CONFIG[setup.enemyValue] ?? ENEMY_CONFIG.standard;
+  const profile = profileFromDifficulty(setup.difficulty, cfg.playstyle);
+  const tuning = buildTuning({ difficulty: setup.difficulty, mutators: setup.mutators } as SkirmishConfig);
   game = new Game(stage, hud, {
     seed,
     playerLoadout: loadLoadout(),
-    aiLoadout: enemy.loadout,
-    aiProfile: enemy.profile,
-    simOptions: { mapLayout: generateMap(seed), rules: { manualCollect: true } },
-    onEnd: showSkirmishEnd,
+    aiLoadout: cfg.loadout,
+    aiProfile: profile,
+    simOptions: {
+      mapLayout: generateMap(seed),
+      rules: { manualCollect: true, incomeMult: tuning.incomeMult },
+      start: tuning.start
+    },
+    onEnd: (winner, sim) => showSkirmishEnd(winner, sim, setup),
     ...battleUiOptions()
   });
 }
 
-function showSkirmishEnd(winner: number, sim: Sim): void {
+function showSkirmishEnd(winner: number, sim: Sim, setup: SkirmishSetup): void {
   const win = winner === 0;
+  const ownHq = sim.hqOf(0);
+  const enemyHq = sim.hqOf(1);
+  const grade = gradeMatch({
+    won: win,
+    ownHqFrac: ownHq ? Math.max(0, ownHq.hp / ownHq.maxHp) : 0,
+    enemyHqFrac: enemyHq ? Math.max(0, enemyHq.hp / enemyHq.maxHp) : 0,
+    time: sim.time,
+    difficulty: setup.difficulty
+  });
+
+  // fold the result into the persistent record and learn which bests it broke
+  const rec = loadRecord();
+  const damage = sim.players[0].damageDealt;
+  const deltas = recordMatch(rec, { won: win, time: sim.time, damage });
+
   const title = document.getElementById('end-title')!;
   title.textContent = win ? 'VICTORY' : 'DEFEAT';
   title.className = win ? 'win' : 'loss';
-  const m = Math.floor(sim.time / 60);
-  const s = Math.floor(sim.time % 60);
-  document.getElementById('end-stats')!.innerHTML = `
-    <div><span>Battle length</span><b>${m}:${s.toString().padStart(2, '0')}</b></div>
-    <div><span>Damage dealt</span><b>${Math.round(sim.players[0].damageDealt)}</b></div>
-    <div><span>Damage taken</span><b>${Math.round(sim.players[1].damageDealt)}</b></div>
-  `;
+
+  // grade badge
+  const gradeEl = document.getElementById('end-grade')!;
+  gradeEl.classList.remove('hidden');
+  const letterEl = gradeEl.querySelector('.grade-letter') as HTMLElement;
+  letterEl.textContent = grade.letter;
+  letterEl.className = `grade-letter ${grade.cls}`;
+  (gradeEl.querySelector('.grade-blurb') as HTMLElement).textContent = grade.blurb;
+
+  // field-report ledger
+  const st = game?.stats ?? { cardsPlayed: 0, collects: 0, peakArmy: 0, enemyLost: 0, ownLost: 0 };
+  const row = (label: string, value: string, hot = false) =>
+    `<div><span>${label}</span><b class="${hot ? 'hot' : ''}">${value}</b></div>`;
+  document.getElementById('end-stats')!.innerHTML = [
+    row('Battle length', fmtClock(sim.time), deltas.newFastestWin),
+    row('Commander', `${ENEMY_META[setup.enemyValue]?.name ?? '—'} · ${diffLabel(setup.difficulty)}`),
+    row('Damage dealt', String(Math.round(damage)), deltas.newMostDamage),
+    row('Damage taken', String(Math.round(sim.players[1].damageDealt))),
+    row('Peak army', String(st.peakArmy)),
+    row('Units destroyed / lost', `${st.enemyLost} / ${st.ownLost}`),
+    row('Cards played', String(st.cardsPlayed))
+  ].join('');
+
+  // record line: celebrate any new bests, then the running tally
+  const bests: string[] = [];
+  if (deltas.newFastestWin) bests.push('FASTEST VICTORY');
+  if (deltas.newBestStreak) bests.push(`BEST STREAK ${rec.bestStreak}`);
+  if (deltas.newMostDamage) bests.push('RECORD DAMAGE');
+  const winPct = Math.round((rec.wins / rec.matches) * 100);
+  let recHtml = '';
+  if (win && rec.streak >= 2) recHtml += `On a <b>${rec.streak}-win</b> streak. `;
+  recHtml += `Record <b>${rec.wins}–${rec.losses}</b> · <b>${winPct}%</b> wins.`;
+  if (bests.length) recHtml = `<span class="nb">★ NEW ${bests.join(' · ')}</span><br>${recHtml}`;
+  const recordEl = document.getElementById('end-record')!;
+  recordEl.innerHTML = recHtml;
+  recordEl.classList.remove('hidden');
+
+  // rematch the SAME field (learn a brutal map), or brief a fresh one
+  document.getElementById('btn-rematch')!.classList.remove('hidden');
   endEl.classList.remove('hidden');
 }
 
-document.getElementById('btn-deploy')!.addEventListener('click', startSkirmish);
-document.getElementById('btn-again')!.addEventListener('click', startSkirmish);
+document.getElementById('btn-deploy')!.addEventListener('click', () => openBriefing(readMenuSetup(), freshSeed()));
+document.getElementById('btn-again')!.addEventListener('click', () => openBriefing(lastSkirmish?.setup ?? readMenuSetup(), freshSeed()));
+document.getElementById('btn-rematch')!.addEventListener('click', () => {
+  if (lastSkirmish) launchSkirmish(lastSkirmish.setup, lastSkirmish.seed);
+});
 document.getElementById('btn-menu')!.addEventListener('click', showMenu);
 
 // ── tutorial ────────────────────────────────────────────────────────────────
@@ -659,6 +820,10 @@ function showMpEnd(winner: TeamId, localTeam: TeamId): void {
   const title = document.getElementById('end-title')!;
   title.textContent = win ? 'VICTORY' : 'DEFEAT';
   title.className = win ? 'win' : 'loss';
+  // the graded report card + rematch are skirmish-only — keep the MP end clean
+  document.getElementById('end-grade')!.classList.add('hidden');
+  document.getElementById('end-record')!.classList.add('hidden');
+  document.getElementById('btn-rematch')!.classList.add('hidden');
   const sim = game!.sim;
   const m = Math.floor(sim.time / 60);
   const s = Math.floor(sim.time % 60);

@@ -105,7 +105,9 @@ app.whenReady().then(async () => {
     await sleep(500);
 
     // ── battle: opening desks, mid-game, the four staff posts, armed card ──
-    await js(`document.getElementById('btn-deploy').click()`);
+    await js(`document.getElementById('btn-deploy').click()`); // opens the briefing
+    await sleep(700);
+    await js(`document.getElementById('m-deploy').click()`); // DEPLOY from the briefing
     await sleep(3400);
     await cap('battle-open');
     await js(`window.__game.fastForward(40)`);

@@ -50,7 +50,9 @@ app.whenReady().then(async () => {
     await win.loadURL(`${BASE}/`);
     await js('document.fonts.ready.then(() => 1)');
     await sleep(1200);
-    await js(`document.getElementById('btn-deploy').click()`);
+    await js(`document.getElementById('btn-deploy').click()`); // opens the briefing
+    await sleep(700);
+    await js(`document.getElementById('m-deploy').click()`); // DEPLOY from the briefing
     await sleep(3400);
     await cap('hud-open');
     await js(`window.__game.fastForward(30)`);

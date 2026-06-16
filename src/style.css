@@ -115,7 +115,8 @@ html, body, #app {
 
 /* ── the cut plate (DESIGN_GUIDEBOOK §4.1): bg = border, ::before = face ── */
 .panel, button, .pill, .card, .ccard, .card-row, .deck-row, #toast, #hint,
-.wbadge, .pwrbadge, #enemy-select span, .intel-chip, #cmap, #minimap {
+.wbadge, .pwrbadge, #enemy-select span, .intel-chip, #cmap, #minimap,
+.grade-letter, #skirmish-record {
   position: relative;
   isolation: isolate;
   clip-path: var(--oct);
@@ -125,7 +126,7 @@ html, body, #app {
 .panel::before, button::before, .pill::before, .card::before, .ccard::before,
 .card-row::before, .deck-row::before, #toast::before, #hint::before,
 .wbadge::before, .pwrbadge::before, #enemy-select span::before,
-.intel-chip::before, #cmap::before {
+.intel-chip::before, #cmap::before, .grade-letter::before, #skirmish-record::before {
   content: '';
   position: absolute;
   inset: 1px;
@@ -1083,6 +1084,57 @@ button.refresh.surged .cost { color: var(--danger); }
   color: var(--ink-faint);
 }
 
+/* ── skirmish match modifiers: composable toggle chips ── */
+#mutator-select { display: flex; gap: 8px; }
+.mut-chip {
+  --cut: 6px;
+  --pl-fill: var(--s1);
+  --pl-line: var(--line);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 4px 7px;
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+.mut-chip .icn { margin: 0; font-size: 17px; color: var(--ink-faint); transition: color var(--t-fast); }
+.mut-chip:hover { --pl-fill: #26261f; --pl-line: var(--line-hi); color: var(--ink); }
+.mut-chip.on { --pl-line: var(--brass); --pl-fill: #332b1a; color: var(--ink-hi); }
+.mut-chip.on .icn { color: var(--brass-hi); }
+
+/* ── skirmish service record strip ── */
+#skirmish-record {
+  --cut: 8px;
+  --pl-fill: var(--s1);
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px 20px;
+  padding: 9px 18px;
+}
+.rec-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; line-height: 1; }
+.rec-stat b {
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  color: var(--ink-hi);
+  font-variant-numeric: tabular-nums;
+}
+.rec-stat b.hot { color: var(--brass-hi); }
+.rec-stat span {
+  font-family: var(--font-cond);
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
 /* ════════════════════════ LOADOUT EDITOR ════════════════════════ */
 
 #loadout-editor { gap: calc(14px * var(--menuscale)); padding: 28px 0 18px; justify-content: flex-start; }
@@ -1415,6 +1467,10 @@ button.refresh.surged .cost { color: var(--danger); }
   color: var(--ink);
 }
 .intel-chip .icn { color: var(--team-foe); font-size: 12px; }
+/* player-chosen match modifiers read brass, not enemy-orange */
+.intel-chip.mod { --pl-line: var(--brass-deep); --pl-fill: rgba(54, 44, 26, 0.5); color: var(--ink-hi); }
+.intel-chip.mod .icn { color: var(--brass-hi); }
+.brief-mods { display: flex; flex-wrap: wrap; gap: 6px; margin: 1px 0; }
 
 /* ════════════════════════ END SCREEN ════════════════════════ */
 
@@ -1437,10 +1493,60 @@ button.refresh.surged .cost { color: var(--danger); }
   color: var(--ink-dim);
   margin-top: -14px;
 }
-#end-stats { display: flex; flex-direction: column; gap: 9px; padding: 18px 30px; min-width: 330px; }
-#end-stats div { display: flex; justify-content: space-between; gap: 40px; font-size: 13.5px; }
+#end-report { display: flex; align-items: stretch; justify-content: center; gap: 18px; flex-wrap: wrap; }
+#end-stats { display: flex; flex-direction: column; gap: 8px; padding: 16px 28px; min-width: 318px; justify-content: center; }
+#end-stats div { display: flex; justify-content: space-between; gap: 40px; font-size: 13px; }
 #end-stats b { font-family: var(--font-cond); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink-hi); letter-spacing: 0.04em; }
+#end-stats b.hot { color: var(--brass-hi); }
 #end-stats span { color: var(--ink-dim); }
+
+/* report card: a graded badge beside the ledger */
+#end-grade { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; padding: 4px 6px; }
+#end-grade.hidden { display: none; }
+.grade-letter {
+  --cut: 16px;
+  --pl-fill: #14140f;
+  width: 132px;
+  height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-stencil);
+  font-weight: 400;
+  font-size: 84px;
+  line-height: 1;
+  padding-bottom: 8px;
+  color: var(--ink-hi);
+}
+.grade-letter.s { color: var(--brass-hi); --pl-line: var(--brass-hi); filter: drop-shadow(0 0 18px rgba(242, 200, 96, 0.45)); }
+.grade-letter.a { color: var(--olive); --pl-line: var(--olive); filter: drop-shadow(0 0 14px rgba(174, 191, 114, 0.32)); }
+.grade-letter.b { color: var(--ink-hi); --pl-line: var(--line-hi); }
+.grade-letter.c { color: var(--ink); --pl-line: var(--line-hi); }
+.grade-letter.d { color: var(--danger); --pl-line: var(--brass-deep); }
+.grade-letter.f { color: var(--danger); --pl-line: var(--danger); filter: drop-shadow(0 0 14px rgba(224, 86, 63, 0.3)); }
+.grade-blurb {
+  font-family: var(--font-cond);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.03em;
+  line-height: 1.32;
+  color: var(--ink-dim);
+  text-align: center;
+  max-width: 168px;
+}
+
+#end-record {
+  font-family: var(--font-cond);
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 0.07em;
+  color: var(--ink-dim);
+  text-align: center;
+}
+#end-record.hidden { display: none; }
+#end-record b { color: var(--brass-hi); font-variant-numeric: tabular-nums; }
+#end-record .nb { color: var(--olive); letter-spacing: 0.12em; }
+
 .end-buttons { display: flex; gap: 12px; }
 
 /* ════════════════════════ DEV GALLERY ════════════════════════ */

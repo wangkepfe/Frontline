@@ -125,10 +125,13 @@
           <input type="range" id="ai-difficulty" min="0" max="100" value="65" aria-label="AI difficulty" />
           <div class="diff-ends"><span>Recruit</span><span>Elite</span></div>
         </div>
+        <div class="opt-title">MATCH MODIFIERS — OPTIONAL</div>
+        <div id="mutator-select"></div>
         <div class="btn-row">
-          <button id="btn-deploy" data-icn="chevR">SKIRMISH</button>
+          <button id="btn-deploy" class="primary" data-icn="chevR">SKIRMISH</button>
           <button id="btn-loadout">LOADOUT</button>
         </div>
+        <div id="skirmish-record" class="hidden"></div>
         <button id="btn-multiplayer" data-icn="battle">MULTIPLAYER (LAN)</button>
         <button id="btn-exit" class="hidden">EXIT GAME</button>
       </div>
@@ -169,9 +172,17 @@
     <div id="end" class="screen hidden">
       <h1 id="end-title" class="win">VICTORY</h1>
       <div id="end-sub">FIELD REPORT</div>
-      <div id="end-stats" class="panel"></div>
+      <div id="end-report">
+        <div id="end-grade" class="hidden">
+          <span class="grade-letter"></span>
+          <span class="grade-blurb"></span>
+        </div>
+        <div id="end-stats" class="panel"></div>
+      </div>
+      <div id="end-record" class="hidden"></div>
       <div class="end-buttons">
-        <button id="btn-again" class="primary" data-icn="chevR">RE-DEPLOY</button>
+        <button id="btn-rematch" class="hidden" data-icn="play">REMATCH MAP</button>
+        <button id="btn-again" class="primary" data-icn="chevR">NEW BATTLE</button>
         <button id="btn-menu">MAIN MENU</button>
       </div>
     </div>

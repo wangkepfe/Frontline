@@ -124,7 +124,9 @@ app.whenReady().then(async () => {
       await js('document.fonts.ready.then(() => 1)');
       await setRes(w, h);
       await sleep(300);
-      await js(`document.getElementById('btn-deploy').click()`);
+      await js(`document.getElementById('btn-deploy').click()`); // opens the briefing
+      await sleep(700);
+      await js(`document.getElementById('m-deploy').click()`); // DEPLOY from the briefing
       await sleep(3200);
       await js(`window.__game && window.__game.fastForward(30)`);
       await sleep(900);

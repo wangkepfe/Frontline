@@ -92,8 +92,10 @@ export class Game {
   private worldUi: HTMLElement;
   /** bouncing tutorial arrow that points at the current hint's target */
   private tutArrow: HTMLElement | null = null;
-  /** counters for hint predicates */
-  stats = { cardsPlayed: 0, collects: 0 };
+  /** counters for hint predicates + the post-battle field report. Pure
+   *  render-side accounting (tallied from drained events) — never read by the
+   *  deterministic sim, so it can't perturb a match. */
+  stats = { cardsPlayed: 0, collects: 0, peakArmy: 0, enemyLost: 0, ownLost: 0 };
 
   constructor(private stage: HTMLElement, hud: Hud, private opts: GameOptions) {
     this.localTeam = opts.localTeam ?? 0;
@@ -570,8 +572,15 @@ export class Game {
 
     const events = this.sim.drainEvents();
     this.view.handleEvents(events);
+    const enemyTeam: TeamId = this.localTeam === 0 ? 1 : 0;
     for (const e of events) {
       sfxForSimEvent(e);
+      // field-report tallies: a destroyed combat unit counts as a kill for the
+      // other side (harvesters/trucks aren't "army", so don't pad either column)
+      if (e.t === 'unitDied' && e.kind !== 'harvester') {
+        if (e.team === enemyTeam) this.stats.enemyLost++;
+        else if (e.team === this.localTeam) this.stats.ownLost++;
+      }
       // supply truck banked a silo: same fly-chips as a manual collect
       if (e.t === 'truckCollect' && e.team === this.localTeam) {
         const b = this.sim.buildings.find((x) => x.id === e.id);
@@ -588,6 +597,13 @@ export class Game {
       }
     }
     this.prevSimTime = this.sim.time;
+
+    // peak-army high-water mark for the field report (own combat units afield)
+    let army = 0;
+    for (const u of this.sim.units) {
+      if (u.team === this.localTeam && u.hp > 0 && u.kind !== 'harvester') army++;
+    }
+    if (army > this.stats.peakArmy) this.stats.peakArmy = army;
 
     // armed card may have expired or been consumed
     if (this.armedSlot >= 0 && !this.sim.players[this.localTeam].hand[this.armedSlot]) {

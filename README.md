@@ -39,7 +39,14 @@ drag onto the battlefield) and collect resources. That's the whole interface.**
   the run is over.
 - **Tutorial** — five short missions that introduce one system each, PvZ-style:
   real battles, minimal text, state-triggered hints.
-- **Skirmish** — single battle vs an AI commander with a 16-card loadout editor.
+- **Skirmish** — quick battles vs an AI commander, with a 16-card loadout editor,
+  three opposing playstyles and a difficulty dial that scales the enemy's reflexes
+  *and* its supply rate. A pre-deploy **briefing** previews the generated map (reroll
+  it if the layout looks unfair) and the active modifiers; optional **match
+  modifiers** (Blitz economy, Sudden Death, Heavy Metal) stack symmetrically for
+  variety. Every match closes with a **graded field report** (S–F) and folds into a
+  persistent **service record** — win streaks, win rate, fastest victory — with a
+  one-tap rematch of the exact same battlefield.
 - **Multiplayer (LAN)** — 1v1 over a local network in the desktop app. One player
   hosts (their screen shows the address); the other joins by IP. Each brings their
   own skirmish loadout, and the board orients to each commander's own HQ. Runs on
