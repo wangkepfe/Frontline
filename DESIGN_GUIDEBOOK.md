@@ -242,13 +242,31 @@ and the hand is split across three desks of two proposal documents each.
   so slots place into the post grid).
 - Slot indices are fixed (`cards.ts CATEGORY_SLOTS`); a card is dealt only
   to its own desk, and hotkeys 1–6 follow the indices left→right.
-- **The chrome scales with the window**: everything is authored at
-  1920×1080 and `main.ts fitUiScale()` sets `--uiscale =
-  clamp(0.75, min(w/1920, h/1080), 3)`; style.css applies it as CSS
-  `zoom` on `.post / #warn / #hint / #toast / .pause-box / .deck-box /
-  #modal-body`. World badges (`.wbadge/.pwrbadge`) and `.flychip` instead
-  scale their `font-size` by the same factor with em paddings — game.ts
-  anchors them in screen px, and zoom would re-map those coordinates.
+- **The chrome scales with the window** via TWO tokens set together in
+  `main.ts fitUiScale()` (on load + `resize`), `ratio = min(w/1920, h/1080)`:
+  - `--uiscale = clamp(0.55, ratio, 3)` — the corner-anchored battle HUD
+    chrome + field slips. Floored low (0.55) so the four posts shrink on
+    small/tablet/phone screens and never eat the diamond battlefield.
+    style.css applies it as CSS `zoom` on `.post / #warn / #hint / #toast /
+    #netwait`. World badges (`.wbadge/.pwrbadge`), `.flychip` and the
+    campaign node markers (`.cnode/.cn-marker/.cn-label`) instead scale via
+    `calc(px * var(--uiscale|--menuscale))` — JS anchors them in screen px,
+    and zoom would re-map those coordinates.
+  - `--menuscale = ratio>=1 ? min(3,ratio) : max(0.5, min(1, w/1180, h/660))`
+    — every full-screen CENTERED surface (menu, campaign, loadout, end,
+    modals, overlays, act splash). Held at native **1.0 from phone up
+    through 1080p** (it reads crisp + full there; scaling it down at
+    720p/tablet looks worse), scaled UP on bigger displays, shrunk only on
+    genuinely small viewports. CSS `zoom` on `.lockup / .menu-box /
+    .menu-foot / .camp-head / .camp-legend / .editor-head / #card-list /
+    .editor-foot / #end-* / .as-inner / .pause-box / .deck-box / #modal-body`.
+  - **Zoom + viewport-unit law**: a `vh/vw` inside a zoomed element is
+    multiplied by that zoom, so every viewport cap is divided back out —
+    `max-height: calc(86vh / var(--menuscale))`, and a viewport max paired
+    with a px cap is `min(880px, calc(92vw / var(--menuscale)))` (the px cap
+    rides the zoom = bigger on big screens; the vw cap divided = never
+    overflows). `#cmap` is NOT zoomed (it's a WebGL host the 3D board
+    auto-fits) — it is sized `min(calc(1080px*var(--menuscale)), 95vw)`.
 - The camera reserves only thin bands (`src/render/scene.ts`): top 30px
   (warning ticker), bottom 56px (hint/toast slips + the player HQ's
   breathing room), sides 14px. **Posts may overlap the battlefield's

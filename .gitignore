@@ -6,3 +6,4 @@ debug/
 resources/
 *.log
 .DS_Store
+.lab/

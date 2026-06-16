@@ -1,21 +1,23 @@
 import './style.css';
 import { Game } from './game';
 import { Hud } from './ui/hud';
-import { CARDS, DEFAULT_LOADOUT, AI_LOADOUTS, tierLabel, type CardTier } from './sim/cards';
-import { AI_PROFILES } from './sim/ai';
+import { CARDS, DEFAULT_LOADOUT, AI_LOADOUTS, baseId, tierLabel, type CardTier } from './sim/cards';
+import { profileFromDifficulty, type AiPlaystyle, type AiProfile } from './sim/ai';
 import { LOADOUT_SIZE } from './sim/stats';
 import type { Sim } from './sim/sim';
 import { MISSIONS, completeTutorial, tutorialProgress, Mission } from './tutorial';
 import { generateMap } from './sim/mapgen';
 import { sfx } from './audio/sfx';
 import {
-  RunState, clearRun, loadRun, newRun, nodeById, saveRun, battleOptions
+  RunState, advanceAct, clearRun, isFinalBoss, loadRun, newRun, nodeById, saveRun, battleOptions
 } from './campaign/run';
 import {
-  closeModal, hideCampaignMap, openModal, renderCampaignMap, showBattlePreview,
-  showDeckOverlay, showEvent, showForge, showLoot, showRewards, showShop
+  closeModal, hideCampaignMap, openModal, renderCampaignMap, reservePips, showBattlePreview,
+  showDeckOverlay, showEvent, showForge, showLoot, showShop, showVictory
 } from './ui/campaignUi';
+import { hideActSplash, showActSplash } from './ui/actSplash';
 import { cardFaceHtml } from './ui/cardFace';
+import { initTooltips } from './ui/tooltips';
 import { cardIcon, icon } from './ui/icons';
 import { ElectronTransport, netBridge } from './net/electronTransport';
 import { hostSession, joinSession, type SessionResult } from './net/session';
@@ -27,12 +29,31 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-icn]')) {
   el.insertAdjacentHTML('afterbegin', icon(el.dataset.icn!));
 }
 
-// HUD scale: the command-center chrome is authored at 1920×1080 and follows
-// the window via --uiscale (style.css zooms the posts/slips/overlay boxes;
-// world badges scale their font instead — their px anchors must stay true)
+// keyword tooltips (Sabot Rounds, Reactive Armor, …) — UI-only, global handlers
+initTooltips();
+
+// UI scale: everything is authored at 1920×1080 and follows the window. Two
+// scales, because the battle HUD and the full-screen menus want different floors:
+//   --uiscale   corner-anchored command-center chrome + field slips + world
+//               badges. Shrinks on small screens so the four posts never eat the
+//               battlefield; floored low enough that tablets/phones still fit
+//               the diamond. (style.css zooms .post/#warn/#hint/#toast; world
+//               badges scale their font instead — their px anchors must stay true.)
+//   --menuscale full-screen centered UI (menus, campaign, loadout, end, modals,
+//               overlays, act splash). Held at native 1.0 from phone up through
+//               1080p (it reads crisp and full there), scaled UP on bigger
+//               displays, and shrunk only on genuinely small viewports (short
+//               laptops, phones) so it fits without clipping.
 function fitUiScale(): void {
-  const s = Math.min(3, Math.max(0.75, Math.min(window.innerWidth / 1920, window.innerHeight / 1080)));
-  document.documentElement.style.setProperty('--uiscale', s.toFixed(3));
+  const w = window.innerWidth, h = window.innerHeight;
+  const ratio = Math.min(w / 1920, h / 1080);
+  const ui = Math.min(3, Math.max(0.55, ratio));
+  const menu = ratio >= 1
+    ? Math.min(3, ratio)
+    : Math.max(0.5, Math.min(1, w / 1180, h / 660));
+  const root = document.documentElement.style;
+  root.setProperty('--uiscale', ui.toFixed(3));
+  root.setProperty('--menuscale', menu.toFixed(3));
 }
 window.addEventListener('resize', fitUiScale);
 fitUiScale();
@@ -158,6 +179,7 @@ document.getElementById('btn-pause-surrender')!.addEventListener('click', () => 
 function showMenu(): void {
   killMatch();
   closeModal();
+  hideActSplash();
   hideCampaignMap();
   endEl.classList.add('hidden');
   editorEl.classList.add('hidden');
@@ -195,15 +217,34 @@ function saveLoadout(loadout: string[]): void {
   localStorage.setItem(LS_KEY, JSON.stringify(loadout));
 }
 
-const ENEMY_CONFIG: Record<string, { loadout: string[]; profile: keyof typeof AI_PROFILES }> = {
-  standard: { loadout: AI_LOADOUTS.balanced, profile: 'standard' },
-  aggressive: { loadout: AI_LOADOUTS.rush, profile: 'aggressive' },
-  turtle: { loadout: AI_LOADOUTS.armor, profile: 'turtle' }
+// the three skirmish commanders are PLAYSTYLES; the slider sets difficulty
+const ENEMY_CONFIG: Record<string, { loadout: string[]; playstyle: AiPlaystyle }> = {
+  standard: { loadout: AI_LOADOUTS.balanced, playstyle: 'balanced' },
+  aggressive: { loadout: AI_LOADOUTS.rush, playstyle: 'rush' },
+  turtle: { loadout: AI_LOADOUTS.armor, playstyle: 'armor' }
 };
 
-function selectedEnemy(): { loadout: string[]; profile: keyof typeof AI_PROFILES } {
+function aiDifficulty(): number {
+  const el = document.getElementById('ai-difficulty') as HTMLInputElement | null;
+  return (el ? parseInt(el.value, 10) : 65) / 100;
+}
+
+function diffLabel(d: number): string {
+  return d < 0.22 ? 'Recruit' : d < 0.45 ? 'Trained' : d < 0.72 ? 'Veteran' : d < 0.9 ? 'Elite' : 'Legendary';
+}
+
+function selectedEnemy(): { loadout: string[]; profile: AiProfile } {
   const checked = document.querySelector('input[name="enemy"]:checked') as HTMLInputElement | null;
-  return ENEMY_CONFIG[checked?.value ?? 'standard'];
+  const cfg = ENEMY_CONFIG[checked?.value ?? 'standard'];
+  return { loadout: cfg.loadout, profile: profileFromDifficulty(aiDifficulty(), cfg.playstyle) };
+}
+
+{
+  const slider = document.getElementById('ai-difficulty') as HTMLInputElement | null;
+  const label = document.getElementById('diff-label');
+  const sync = () => { if (label) label.textContent = diffLabel(aiDifficulty()); };
+  slider?.addEventListener('input', sync);
+  sync();
 }
 
 function startSkirmish(): void {
@@ -217,7 +258,7 @@ function startSkirmish(): void {
     seed,
     playerLoadout: loadLoadout(),
     aiLoadout: enemy.loadout,
-    aiProfile: AI_PROFILES[enemy.profile],
+    aiProfile: enemy.profile,
     simOptions: { mapLayout: generateMap(seed), rules: { manualCollect: true } },
     onEnd: showSkirmishEnd,
     ...battleUiOptions()
@@ -374,37 +415,72 @@ function startCampaignBattle(nodeId: number): void {
   game = new Game(stage, hud, {
     ...battleOptions(run!, nodeId),
     ...battleUiOptions(),
-    onEnd: (winner) => {
+    onEnd: (winner, sim) => {
       killMatch();
       if (winner === 0) {
         run!.at = nodeId;
         run!.battlesWon++;
+        run!.attempt = 0; // node cleared — the next first-attempt deals fresh
         saveRun(run!);
-        if (node.type === 'boss') {
-          run!.victory = true;
-          clearRun();
-          const body = openModal(`
-            <h2 class="win">${icon('star')} OPERATION COMPLETE</h2>
-            <p class="event-desc">The stronghold has fallen. ${run!.battlesWon} battles won with a force of ${run!.deck.length} cards.</p>
-            <div class="modal-actions"><button id="m-menu" class="primary">RETURN TO COMMAND</button></div>
-          `);
-          body.querySelector('#m-menu')!.addEventListener('click', () => {
-            run = null;
-            closeModal();
-            showMenu();
-          });
-        } else {
-          showCampaign();
-          showRewards(run!, nodeId, () => {
-            saveRun(run!);
+        // every win opens the spoils window (stats + choose-one reward); the
+        // node-type progression runs only once the player has claimed a reward
+        showCampaign();
+        showVictory(run!, nodeId, sim, () => {
+          saveRun(run!);
+          if (node.type === 'boss') {
+            if (isFinalBoss(run!, node)) {
+              run!.victory = true;
+              clearRun();
+              const body = openModal(`
+                <h2 class="win">${icon('star')} OPERATION COMPLETE</h2>
+                <p class="event-desc">The enemy capital has fallen. ${run!.battlesWon} battles won across three fronts with a force of ${run!.deck.length} cards.</p>
+                <div class="modal-actions"><button id="m-menu" class="primary">RETURN TO COMMAND</button></div>
+              `);
+              body.querySelector('#m-menu')!.addEventListener('click', () => {
+                run = null;
+                closeModal();
+                showMenu();
+              });
+            } else {
+              // act cleared — advance to the next biome/front with a splash
+              advanceAct(run!);
+              saveRun(run!);
+              showCampaign();
+              showActSplash(run!, () => {});
+            }
+          } else {
             showCampaign();
-          });
-        }
+          }
+        });
+      } else if (run!.reserves > 0) {
+        // a RESERVE absorbs the loss: regroup and try again, or reroute. run.at is
+        // NOT advanced, so the lost node stays selectable on the campaign map.
+        run!.reserves--;
+        run!.attempt++; // a retry deals a fresh (still fair) card order, not a replay
+        saveRun(run!);
+        showCampaign();
+        const left = run!.reserves;
+        const tail = left === 0
+          ? `<b class="rsv-last">${reservePips(left)}</b> — that was your last reserve; the next defeat ends the operation.`
+          : `<b>${reservePips(left)}</b> — ${left} ${left === 1 ? 'reserve' : 'reserves'} left.`;
+        const body = openModal(`
+          <h2 class="loss">${icon('alert')} FORCES REPELLED</h2>
+          <p class="event-desc">Your assault was thrown back, but the operation holds. ${tail} Adjust your force and try again, or find another route.</p>
+          <div class="modal-actions">
+            <button id="m-deck">REVIEW DECK</button>
+            <button id="m-map" class="primary">RETURN TO MAP</button>
+          </div>
+        `);
+        body.querySelector('#m-map')!.addEventListener('click', closeModal);
+        body.querySelector('#m-deck')!.addEventListener('click', () => {
+          closeModal();
+          showDeckOverlay(run!, () => saveRun(run!), showCampaign);
+        });
       } else {
         clearRun();
         const body = openModal(`
           <h2 class="loss">${icon('x')} OPERATION FAILED</h2>
-          <p class="event-desc">Your HQ fell. ${run!.battlesWon} battles won. The run is over.</p>
+          <p class="event-desc">Reserves exhausted and your HQ fell. ${run!.battlesWon} battles won. The run is over.</p>
           <div class="modal-actions"><button id="m-menu" class="primary">RETURN TO COMMAND</button></div>
         `);
         body.querySelector('#m-menu')!.addEventListener('click', () => {
@@ -418,12 +494,17 @@ function startCampaignBattle(nodeId: number): void {
 }
 
 document.getElementById('btn-campaign')!.addEventListener('click', () => {
-  run = loadRun();
-  if (!run) {
+  const existing = loadRun();
+  if (existing) {
+    run = existing;
+    showCampaign();
+  } else {
+    // a fresh operation opens with the Act I splash over the new biome map
     run = newRun(freshSeed());
     saveRun(run);
+    showCampaign();
+    showActSplash(run, () => {});
   }
-  showCampaign();
 });
 
 // ── multiplayer (local network) ──────────────────────────────────────────────
@@ -689,7 +770,8 @@ for (const [btnId, preset] of [
   ['btn-preset-rush', AI_LOADOUTS.rush]
 ] as const) {
   document.getElementById(btnId)!.addEventListener('click', () => {
-    editCounts = countsFrom([...preset]);
+    // the editor only handles A sides — fold any B-side preset cards back to base
+    editCounts = countsFrom(preset.map((id) => (CARDS[id].side === 'B' ? baseId(id) : id)));
     renderEditor();
   });
 }
@@ -745,6 +827,9 @@ const atelierSpec = bootParams.get('atelier');
 if (atelierSpec !== null) {
   menuEl.classList.add('hidden');
   void import('./render/art/atelier').then((m) => m.runAtelier(atelierSpec));
+} else if (bootParams.get('warmap') !== null) {
+  menuEl.classList.add('hidden');
+  void import('./render/campaignMap').then((m) => m.runWarmap(bootParams.get('warmap') || 'temperate'));
 } else if (bootParams.get('gallery') !== null) {
   menuEl.classList.add('hidden');
   void import('./ui/gallery').then((m) => m.runGallery());

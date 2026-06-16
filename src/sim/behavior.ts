@@ -223,10 +223,16 @@ function tryFire(sim: Sim, u: Unit, target: Combatant): void {
 }
 
 /** Keep / acquire target with per-kind preferences. */
-function updateTarget(sim: Sim, u: Unit, opts: { preferArmor?: boolean; preferEconomy?: boolean; preferBuildings?: boolean; minRange?: number }): Combatant | null {
+function updateTarget(sim: Sim, u: Unit, opts: { preferArmor?: boolean; preferEconomy?: boolean; preferBuildings?: boolean; preferKinds?: ReadonlyArray<Building['kind']>; minRange?: number }): Combatant | null {
   const st = UNIT_STATS[u.kind];
   const existing = findEntity(sim, u.targetId);
-  if (existing) {
+  // order cards (preferKinds) re-evaluate constantly so the strike force snaps
+  // onto the objective kind; normal stances keep their target sticky to avoid
+  // flip-flopping every retarget tick
+  const keepSticky =
+    !opts.preferKinds ||
+    (existing !== null && !isUnit(existing) && opts.preferKinds.includes(existing.kind));
+  if (existing && keepSticky) {
     const d = dist(u.pos, entityPos(existing));
     if (d <= st.sight + 1.5 && (!opts.minRange || d >= opts.minRange - 0.5)) return existing;
   }
@@ -241,7 +247,8 @@ function updateTarget(sim: Sim, u: Unit, opts: { preferArmor?: boolean; preferEc
     minRange: opts.minRange,
     preferArmor: opts.preferArmor,
     preferEconomy: opts.preferEconomy,
-    preferBuildings: opts.preferBuildings
+    preferBuildings: opts.preferBuildings,
+    preferKinds: opts.preferKinds
   });
   u.targetId = t ? t.id : 0;
   return t;
@@ -347,7 +354,7 @@ function defensive(sim: Sim, u: Unit, dt: number, hold?: { anchor: Vec2; leash: 
  * with none left it falls through to the general advance.
  */
 function directed(sim: Sim, u: Unit, dt: number, kinds: ReadonlyArray<Building['kind']>): void {
-  const target = updateTarget(sim, u, { preferBuildings: true });
+  const target = updateTarget(sim, u, { preferKinds: kinds });
   if (target) {
     const tp = entityPos(target);
     const d = dist(u.pos, tp);

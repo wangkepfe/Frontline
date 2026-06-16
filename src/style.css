@@ -62,8 +62,10 @@
   /* the staff typewriter — proposal documents are TYPED, not designed */
   --font-doc: 'Courier Prime', 'Courier New', 'Consolas', monospace;
 
-  /* HUD scale: 1 at 1920×1080, follows the window (set from main.ts) */
+  /* scale tokens: 1 at 1920×1080, follow the window (set from main.ts).
+     --uiscale = corner HUD chrome; --menuscale = full-screen centered UI */
   --uiscale: 1;
+  --menuscale: 1;
 
   /* document paper (proposal cards) */
   --doc-paper: #d9d0af;
@@ -174,9 +176,19 @@ button:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 
 /* the command-center chrome follows the window (zoom re-lays-out, so corner
    insets, plates, and type all scale together). #world-ui stays unzoomed —
-   its badges are positioned in screen px by game.ts. */
-.post, #warn, #hint, #toast, .pause-box, .deck-box, #modal-body {
+   its badges are positioned in screen px by game.ts. The corner posts + field
+   slips ride --uiscale (battlefield-protective); full-screen centered UI rides
+   --menuscale (held native through 1080p, scaled up beyond — see main.ts). */
+.post, #warn, #hint, #toast, #netwait {
   zoom: var(--uiscale);
+}
+.lockup, .menu-box, .menu-foot,
+.camp-head, .camp-legend,
+.editor-head, #card-list, .editor-foot,
+#end-title, #end-sub, #end-stats, .end-buttons,
+.as-inner,
+.pause-box, .deck-box, #modal-body {
+  zoom: var(--menuscale);
 }
 
 .post {
@@ -427,6 +439,10 @@ button.refresh.surged .cost { color: var(--danger); }
 .pill.oil { color: var(--oil-res); }
 .pill.power { color: var(--power-res); }
 .pill.power.deficit { --pl-line: var(--danger); animation: warnpulse 1.2s infinite; }
+#camp-reserves { color: var(--brass-hi); letter-spacing: 0.1em; font-weight: 700; }
+#camp-reserves.depleted { color: var(--danger); --pl-line: var(--danger); animation: warnpulse 1.2s infinite; }
+.rsv-last { color: var(--danger); }
+.intel-chip.upgrade { color: var(--danger); --pl-line: var(--danger); }
 .pill.power.deficit b { color: var(--danger); }
 .pill.time { color: var(--ink-faint); }
 .pill.time b { color: var(--ink); font-weight: 600; }
@@ -517,22 +533,23 @@ button.refresh.surged .cost { color: var(--danger); }
 /* world badges scale via font-size (em-padded), NOT zoom — game.ts anchors
    them in screen px and zoom would re-map those coordinates */
 .wbadge {
-  --cut: 6px;
+  --cut: 7px;
   position: absolute;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 0.37em;
-  padding: 0.3em 0.81em;
+  gap: 0.42em;
+  /* bigger target: easy to spot and click, hard to miss (was 13.5px / 0.3em 0.81em) */
+  padding: 0.46em 1.05em;
   font-family: var(--font-cond);
   font-weight: 700;
-  font-size: calc(13.5px * var(--uiscale));
+  font-size: calc(20px * var(--uiscale));
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
   cursor: pointer;
   pointer-events: auto;
   animation: collectpop 0.25s var(--ease), collectbob 1.5s 0.25s infinite ease-in-out;
-  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.6));
+  filter: drop-shadow(0 3px 7px rgba(0, 0, 0, 0.65));
 }
 .wbadge.gold { --pl-fill: #43350f; --pl-line: #a8842e; color: var(--gold-res); }
 .wbadge.oil { --pl-fill: #1d3140; --pl-line: #4f81a6; color: var(--oil-res); }
@@ -552,6 +569,26 @@ button.refresh.surged .cost { color: var(--danger); }
 @keyframes collectpop { from { transform: translateX(-50%) scale(0.3); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 @keyframes collectbob { 50% { margin-top: -5px; } }
 @keyframes fullpulse { 50% { filter: drop-shadow(0 0 10px rgba(255, 200, 90, 0.65)); margin-top: -4px; } }
+
+/* ── tutorial guidance arrow: bobs just above the card / tile / badge to act on.
+   lives in #world-ui (screen-px, unzoomed), tip points DOWN at its target ── */
+.tut-arrow {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  width: calc(28px * var(--uiscale));
+  height: calc(34px * var(--uiscale));
+  transform: translate(-50%, -100%); /* bottom-center sits on the target point */
+  color: var(--brass-hi);
+  filter: drop-shadow(0 0 7px rgba(242, 200, 96, 0.7)) drop-shadow(0 3px 4px rgba(0, 0, 0, 0.6));
+  animation: arrowbob 0.85s infinite ease-in-out;
+}
+.tut-arrow svg { width: 100%; height: 100%; display: block; fill: currentColor; }
+.tut-arrow.hidden { display: none; }
+@keyframes arrowbob {
+  0%, 100% { transform: translate(-50%, -100%); }
+  50% { transform: translate(-50%, calc(-100% - 10px)); }
+}
 
 .pwrbadge {
   --cut: 5px;
@@ -594,7 +631,7 @@ button.refresh.surged .cost { color: var(--danger); }
   letter-spacing: 0.02em;
   pointer-events: none;
   animation: hintpulse 1.6s infinite;
-  max-width: 44vw;
+  max-width: calc(44vw / var(--uiscale)); /* undo the parent zoom on the vw */
   text-align: center;
 }
 @keyframes hintpulse { 50% { --pl-line: var(--olive); } }
@@ -653,7 +690,10 @@ button.refresh.surged .cost { color: var(--danger); }
 .card.unaffordable { filter: grayscale(0.65) brightness(0.62) drop-shadow(0 5px 10px rgba(0, 0, 0, 0.5)); }
 .card.unaffordable .cchip.gold { background: #57231a; color: #f0a48e; }
 .card.locked { filter: grayscale(0.85) brightness(0.72) drop-shadow(0 5px 10px rgba(0, 0, 0, 0.5)); }
-.card.expiring { --pl-line: #8a3526; }
+/* a proposal about to be withdrawn: red edge + the whole slip blinks toward
+   half-transparent so it can't be missed at the edge of vision */
+.card.expiring { --pl-line: #8a3526; animation: cardblink 0.72s ease-in-out infinite; }
+@keyframes cardblink { 50% { opacity: 0.5; } }
 .card.up { --pl-line: #c9a23a; }
 .card.up:not(.armed) { filter: drop-shadow(0 0 9px rgba(216, 169, 62, 0.28)) drop-shadow(0 5px 10px rgba(0, 0, 0, 0.5)); }
 
@@ -675,7 +715,6 @@ button.refresh.surged .cost { color: var(--danger); }
   font-size: 25px;
   color: rgba(94, 92, 77, 0.4);
 }
-.card.deal { transform: translateY(28px) rotate(-3deg) scale(0.9); opacity: 0; }
 
 /* document anatomy — classification band, typed headline, printed plate */
 .doc-head {
@@ -780,7 +819,7 @@ button.refresh.surged .cost { color: var(--danger); }
 /* the expiry stamp: a typed countdown — proposals not acted on are withdrawn */
 .card .ttl {
   position: absolute;
-  bottom: 3.5px; left: 8px;
+  bottom: 5.5px; left: 8px;
   z-index: 2;
   font-family: var(--font-doc);
   font-weight: 700;
@@ -790,9 +829,23 @@ button.refresh.surged .cost { color: var(--danger); }
   font-variant-numeric: tabular-nums;
 }
 .card .ttl b { color: #564e38; }
-.card.expiring .ttl { color: var(--doc-red); animation: ttlblink 0.5s infinite; }
-.card.expiring .ttl b { color: var(--doc-red); }
-@keyframes ttlblink { 50% { opacity: 0.4; } }
+.card.expiring .ttl, .card.expiring .ttl b { color: var(--doc-red); }
+/* the draining time bar under the stamp — the countdown made visual */
+.card .ttlbar {
+  position: absolute;
+  left: 7px; right: 22px; bottom: 1.5px;
+  height: 3px;
+  z-index: 2;
+  background: rgba(45, 40, 26, 0.32);
+}
+.card .ttlbar i {
+  display: block;
+  height: 100%;
+  width: calc(var(--ttlfrac, 1) * 100%);
+  background: #93854f;
+  transition: width 0.2s linear;
+}
+.card.expiring .ttlbar i { background: var(--doc-red); }
 
 .cbody { position: absolute; top: 22px; left: 127px; right: 8px; bottom: 16px; z-index: 1; }
 .cname {
@@ -832,7 +885,7 @@ button.refresh.surged .cost { color: var(--danger); }
 }
 .card .key {
   position: absolute;
-  bottom: 3px; right: 4px;
+  bottom: 4.5px; right: 4px;
   z-index: 2;
   font-family: var(--font-doc);
   font-weight: 700;
@@ -911,7 +964,7 @@ button.refresh.surged .cost { color: var(--danger); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
+  gap: calc(22px * var(--menuscale));
   z-index: 10;
   background:
     radial-gradient(ellipse at 50% 120%, rgba(216, 169, 60, 0.07), transparent 55%),
@@ -1021,6 +1074,9 @@ button.refresh.surged .cost { color: var(--danger); }
 .menu-foot {
   position: absolute;
   bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%); /* explicit center: zoom can shift static-pos x */
+  white-space: nowrap;
   font-family: var(--font-cond);
   font-size: 10px;
   letter-spacing: 0.18em;
@@ -1029,7 +1085,7 @@ button.refresh.surged .cost { color: var(--danger); }
 
 /* ════════════════════════ LOADOUT EDITOR ════════════════════════ */
 
-#loadout-editor { gap: 14px; padding: 28px 0 18px; justify-content: flex-start; }
+#loadout-editor { gap: calc(14px * var(--menuscale)); padding: 28px 0 18px; justify-content: flex-start; }
 .editor-head { display: flex; align-items: center; gap: 26px; }
 .editor-head h2, .camp-head h2 {
   font-family: var(--font-cond);
@@ -1047,7 +1103,9 @@ button.refresh.surged .cost { color: var(--danger); }
   grid-template-columns: repeat(2, minmax(350px, 430px));
   gap: 7px 14px;
   overflow-y: auto;
-  max-height: calc(100vh - 200px);
+  /* zoomed by --menuscale, so the viewport budget is divided back out; the
+     130px covers the (also-zoomed) header + footer in the editor's own units */
+  max-height: calc(100vh / var(--menuscale) - 130px);
   padding: 4px 12px;
 }
 .card-row { --cut: 7px; display: flex; align-items: center; gap: 12px; padding: 7px 12px; }
@@ -1096,65 +1154,147 @@ button.refresh.surged .cost { color: var(--danger); }
 
 /* ════════════════════════ CAMPAIGN ════════════════════════ */
 
-#campaign { gap: 14px; }
+#campaign { gap: calc(14px * var(--menuscale)); }
 .camp-head { display: flex; align-items: center; gap: 30px; }
 .camp-head h2 span { color: var(--brass); }
 .camp-stats { display: flex; gap: 10px; align-items: center; }
 .camp-stats .pill { font-size: 14px; color: var(--gold-res); }
 
+#camp-title { color: var(--ink-hi); }
+#camp-act { color: var(--ink-hi); letter-spacing: 0.08em; }
+
 #cmap {
   --cut: 14px;
-  --pl-fill: rgba(17, 17, 14, 0.82);
-  width: min(1000px, 92vw);
-  height: min(480px, 58vh);
+  --pl-fill: rgba(10, 9, 6, 0.9);
+  position: relative;
+  /* the 3D board auto-fits its host, so the host itself carries the scale:
+     grow with --menuscale on big displays, clamp to the viewport on small */
+  width: min(calc(1080px * var(--menuscale)), 95vw);
+  height: min(calc(560px * var(--menuscale)), 64vh);
   overflow: hidden;
 }
-#cmap::after { /* acetate grid over the theatre map */
-  content: '';
-  position: absolute;
-  inset: 1px;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(216, 207, 174, 0.04) 0 1px, transparent 1px 44px),
-    repeating-linear-gradient(90deg, rgba(216, 207, 174, 0.04) 0 1px, transparent 1px 44px);
-}
-#cmap > svg { position: absolute; inset: 0; z-index: 1; } /* the edge-lines layer only — node icons are svgs too */
-.cedge { stroke: #4d5042; stroke-width: 2; stroke-dasharray: 5 5; }
-.cedge.active { stroke: var(--brass); animation: dashcrawl 1.2s linear infinite; }
-@keyframes dashcrawl { to { stroke-dashoffset: -20; } }
+/* the 3D war-table canvas fills the cut-plate; hotspots float above it */
+.cmap-hotspots { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 
 .cnode {
   position: absolute;
-  z-index: 2;
-  width: 50px; height: 50px;
+  transform: translate(-50%, -50%);
+  /* JS sets left/top (the projected px point); the centered box scales with
+     --menuscale via calc, NOT zoom — zoom would re-map those px anchors */
+  width: calc(44px * var(--menuscale)); height: calc(44px * var(--menuscale));
   clip-path: none;
-  border-radius: 50%;
+  border-radius: 0;
   padding: 0;
   display: grid;
   place-items: center;
-  background: var(--s2);
-  box-shadow: inset 0 0 0 2px var(--line), inset 0 8px 10px -6px rgba(236, 228, 196, 0.12), 0 4px 8px rgba(0, 0, 0, 0.45);
-  color: var(--ink);
-  font-size: 21px;
+  background: none;
+  box-shadow: none;
+  /* markers are PURELY VISUAL — clicks & hover are resolved by raycasting the 3D
+     node geometry on the canvas (campaignMap.ts), never by these DOM boxes, so
+     they can never overlap-steal a click. Hover state is pushed in as .hover. */
+  pointer-events: none;
+  cursor: default;
 }
 .cnode::before, .cnode::after { content: none; }
-.cnode .icn { font-size: 21px; margin-right: 0; }
-.cnode.locked { opacity: 0.52; cursor: default; transform: none; }
-.cnode.here { box-shadow: inset 0 0 0 2px var(--ink-hi), 0 0 14px rgba(236, 233, 211, 0.3), 0 4px 8px rgba(0, 0, 0, 0.45); }
-.cnode.open { box-shadow: inset 0 0 0 2px var(--brass), 0 4px 8px rgba(0, 0, 0, 0.45); cursor: pointer; animation: nodepulse 1.4s infinite; }
-.cnode.open:hover { transform: scale(1.12); }
-.cnode.elite { background: #34211b; color: #e8a288; }
-.cnode.shop { color: var(--gold-res); }
-.cnode.forge { color: #a9b4c0; }
-.cnode.loot { color: var(--sand, #c7b68c); }
-.cnode.event { color: var(--olive); }
-.cnode.boss { background: #3c1d1d; color: #ef8e74; width: 64px; height: 64px; }
-.cnode.boss .icn { font-size: 27px; }
-@keyframes nodepulse { 50% { box-shadow: inset 0 0 0 2px var(--brass), 0 0 16px rgba(216, 169, 60, 0.5), 0 4px 8px rgba(0, 0, 0, 0.45); } }
+.cn-marker {
+  width: calc(28px * var(--menuscale)); height: calc(28px * var(--menuscale));
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: rgba(10, 9, 6, 0.66);
+  box-shadow: inset 0 0 0 1.5px var(--line-hi), 0 2px 7px rgba(0, 0, 0, 0.55);
+  color: var(--ink);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.cn-marker .icn { width: calc(15px * var(--menuscale)); height: calc(15px * var(--menuscale)); }
+.cn-label {
+  position: absolute;
+  bottom: calc(50% + 20px * var(--menuscale));
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-cond);
+  font-size: calc(10px * var(--menuscale)); font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-hi);
+  background: rgba(10, 9, 6, 0.82);
+  box-shadow: inset 0 0 0 1px var(--line);
+  padding: 2px 7px;
+  opacity: 0;
+  transition: opacity 0.14s;
+  pointer-events: none;
+}
+/* hover/focus are driven by the raycaster pushing .hover (mouse) or by keyboard
+   focus on the still-focusable open buttons — never by :hover (markers are
+   pointer-events:none, so DOM :hover would never fire) */
+.cnode.hover .cn-label, .cnode.here .cn-label, .cnode.open:focus-visible .cn-label { opacity: 1; }
+.cnode.locked { opacity: 0.55; }
+.cnode.locked .cn-marker { filter: grayscale(0.35) brightness(0.8); }
+.cnode.open { cursor: pointer; }
+.cnode.open .cn-marker { box-shadow: inset 0 0 0 2px var(--brass), 0 0 12px rgba(216, 169, 60, 0.55), 0 2px 7px rgba(0, 0, 0, 0.55); animation: nodepulse 1.5s infinite; }
+.cnode.open.hover .cn-marker, .cnode.open:focus-visible .cn-marker { transform: scale(1.2); }
+.cnode.here .cn-marker { box-shadow: inset 0 0 0 2px var(--ink-hi), 0 0 14px rgba(236, 233, 211, 0.45), 0 2px 7px rgba(0, 0, 0, 0.55); }
+.cn-marker.elite { color: #e8a288; background: rgba(52, 33, 27, 0.78); }
+.cn-marker.boss { color: #ef8e74; background: rgba(60, 29, 29, 0.85); width: calc(36px * var(--menuscale)); height: calc(36px * var(--menuscale)); }
+.cn-marker.boss .icn { width: calc(19px * var(--menuscale)); height: calc(19px * var(--menuscale)); }
+.cn-marker.shop { color: var(--gold-res); }
+.cn-marker.forge { color: #a9b4c0; }
+.cn-marker.loot { color: #c7b68c; }
+.cn-marker.event { color: var(--olive); }
+@keyframes nodepulse { 50% { box-shadow: inset 0 0 0 2px var(--brass), 0 0 18px rgba(216, 169, 60, 0.7), 0 2px 7px rgba(0, 0, 0, 0.55); } }
 .camp-legend { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
 .camp-legend span { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-cond); font-size: 10.5px; letter-spacing: 0.12em; color: var(--ink-dim); }
 .camp-legend .icn { font-size: 13px; }
+
+/* ── act-transition splash (over the new biome map) ── */
+#actsplash {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 50% 40%, transparent 0%, rgba(8, 7, 5, 0.5) 52%, rgba(6, 5, 4, 0.88) 100%),
+    rgba(8, 7, 5, 0.4);
+  animation: as-fade 0.5s var(--ease);
+  --as-accent: var(--brass);
+}
+#actsplash.hidden { display: none; }
+.actsplash.biome-temperate { --as-accent: #8fb56a; }
+.actsplash.biome-desert { --as-accent: #e0a857; }
+.actsplash.biome-winter { --as-accent: #9fc8e6; }
+.as-inner { text-align: center; max-width: 660px; padding: 28px 36px; animation: as-rise 0.6s var(--ease); }
+.as-act {
+  font-family: var(--font-cond);
+  font-size: 15px; letter-spacing: 0.42em; text-transform: uppercase;
+  color: var(--as-accent);
+  margin-bottom: 16px;
+}
+.as-front {
+  font-family: var(--font-stencil);
+  /* fixed px — the whole .as-inner is zoomed by --menuscale, so this tracks the
+     window without a vw term (vw would double-scale under the parent zoom) */
+  font-size: 60px;
+  line-height: 1; letter-spacing: 0.03em;
+  color: var(--ink-hi);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 34px color-mix(in srgb, var(--as-accent) 42%, transparent);
+  margin: 0 0 12px;
+}
+.as-op {
+  font-family: var(--font-cond);
+  font-size: 16px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--as-accent);
+  margin-bottom: 18px;
+}
+.as-op::before, .as-op::after { content: '—'; opacity: 0.5; margin: 0 12px; }
+.as-brief {
+  font-family: var(--font-text);
+  font-size: 15px; line-height: 1.55;
+  color: var(--ink-dim);
+  max-width: 470px; margin: 0 auto 28px;
+}
+#as-begin { font-size: 15px; }
+@keyframes as-fade { from { opacity: 0; } }
+@keyframes as-rise { from { opacity: 0; transform: translateY(16px); } }
 
 /* ════════════════════════ MODAL ════════════════════════ */
 
@@ -1172,8 +1312,10 @@ button.refresh.surged .cost { color: var(--danger); }
 #modal-body {
   --cut: 14px;
   --pl-fill: #20211c;
-  max-width: min(880px, 92vw);
-  max-height: 86vh;
+  /* zoomed by --menuscale: the 880px content cap rides the zoom (bigger on big
+     screens), the viewport caps are divided back out so they never overflow */
+  max-width: min(880px, calc(92vw / var(--menuscale)));
+  max-height: calc(86vh / var(--menuscale));
   overflow-y: auto;
   padding: 24px 30px 22px;
   display: flex;
@@ -1236,7 +1378,7 @@ button.refresh.surged .cost { color: var(--danger); }
   flex-wrap: wrap;
   gap: 16px 12px;
   justify-content: center;
-  max-height: 62vh;
+  max-height: calc(62vh / var(--menuscale)); /* inside the zoomed modal/box */
   overflow-y: auto;
   padding: 6px 2px 2px;
 }
@@ -1245,7 +1387,7 @@ button.refresh.surged .cost { color: var(--danger); }
 .deck-cell .mini-ghost { padding: 4px 0; }
 
 /* deck rows (discharge / refit pickers) */
-.deck-list { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow-y: auto; padding: 2px; }
+.deck-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(52vh / var(--menuscale)); overflow-y: auto; padding: 2px; }
 .deck-row { --cut: 6px; --pl-fill: rgba(32, 33, 28, 0.85); display: flex; align-items: center; gap: 12px; padding: 6px 12px; }
 .deck-row.up { --pl-line: var(--brass-deep); --pl-fill: rgba(56, 46, 18, 0.45); }
 .deck-row.removable { cursor: pointer; transition: filter var(--t-fast); }
@@ -1355,14 +1497,15 @@ button.refresh.surged .cost { color: var(--danger); }
   flex-direction: column;
   gap: 14px;
   padding: 22px 28px 18px;
-  max-width: min(1340px, 94vw);
+  /* zoomed by --menuscale (see the zoom rule): viewport cap divided back out */
+  max-width: min(1340px, calc(94vw / var(--menuscale)));
 }
 #deckview-cards {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
-  max-height: 64vh;
+  max-height: calc(64vh / var(--menuscale));
   overflow-y: auto;
   padding: 6px 2px;
 }
@@ -1386,3 +1529,104 @@ button.danger { --pl-line: var(--danger); color: #ff7b6b; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Keyword tooltips, Veteran promotions, forge deltas, victory spoils
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── glossary keyword links (Sabot Rounds, Reactive Armor, …) ── */
+.kw {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  cursor: help;
+}
+.kw:hover, .kw:focus { color: var(--doc-red); text-decoration-style: solid; outline: none; }
+
+.kw-tip {
+  position: fixed;
+  z-index: 200;
+  max-width: 280px;
+  padding: 9px 12px;
+  background: var(--s1);
+  border: 1px solid var(--line-hi);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  box-shadow: 0 7px 24px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.kw-tip b {
+  display: block;
+  margin-bottom: 3px;
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brass-hi);
+}
+
+/* ── Veteran (forge) promotion marks ── */
+.vettag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  background: var(--brass-deep);
+  color: var(--doc-paper);
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  cursor: help;
+  vertical-align: 1px;
+}
+.vet-word { color: var(--brass-hi); }
+.vet-arrow { margin-left: 7px; color: var(--brass); font-weight: 600; font-size: 10px; letter-spacing: 0.04em; }
+.vet-arrow .icn { font-size: 9px; vertical-align: -0.05em; }
+
+/* ── forge before→after deltas ── */
+.forge-deltas { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0 2px; }
+.fd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.fd i { font-style: normal; margin-right: 2px; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-dim); }
+.fd b { color: var(--ink); }
+.fd b.up { color: var(--olive); }
+.fd em { font-style: normal; color: var(--ink-faint); }
+/* forge candidate rows print the stat preview instead of flavor text */
+.forge-preview { color: var(--olive); font-variant-numeric: tabular-nums; white-space: normal; }
+
+/* ── victory window: stats + choose-one spoils ── */
+.vstats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+.vstats > div { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; background: var(--s2); border: 1px solid var(--line); }
+.vstats span { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.vstats b { font-family: var(--font-cond); font-weight: 700; font-size: 16px; color: var(--ink-hi); font-variant-numeric: tabular-nums; }
+
+.reward-choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 6px; }
+.reward-choice { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 20px; min-width: 152px; }
+.reward-choice .rc-icon { display: flex; font-size: 24px; color: var(--brass); }
+.reward-choice b { font-family: var(--font-cond); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; color: var(--ink-hi); }
+.reward-choice i { font-style: normal; font-size: 10px; color: var(--ink-dim); }
+.reward-choice:hover:not(:disabled) { --pl-line: var(--brass); }
+.reward-choice:disabled { opacity: 0.45; }
+
+/* ── skirmish difficulty slider ── */
+#difficulty-row { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.diff-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--font-cond); letter-spacing: 0.12em; font-size: 11px; color: var(--ink-dim); }
+.diff-head b { color: var(--brass-hi); font-size: 13px; letter-spacing: 0.06em; }
+#ai-difficulty { width: 100%; height: 4px; accent-color: var(--brass); cursor: pointer; }
+.diff-ends { display: flex; justify-content: space-between; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }

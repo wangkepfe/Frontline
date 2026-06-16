@@ -10,6 +10,7 @@ import {
   BuildingRigHandle, TEAM_COLORS, TILE_TOP, TerrainHandle, UnitRigHandle,
   buildBuildingMesh, buildBuildingRig, buildTerrain, buildUnitMesh, buildUnitRig
 } from './meshes';
+import { biomeById, type BiomeId } from './art/biomes';
 import type { BuildingPose, UnitPose } from './art/rig';
 
 interface Bar {
@@ -60,9 +61,9 @@ export class GameView {
   private ghostMatOk = new THREE.MeshBasicMaterial({ color: 0x8effa8, transparent: true, opacity: 0.55, depthWrite: false });
   private ghostMatBad = new THREE.MeshBasicMaterial({ color: 0xff6a52, transparent: true, opacity: 0.5, depthWrite: false });
 
-  constructor(private ctx: SceneCtx, private sim: Sim) {
+  constructor(private ctx: SceneCtx, private sim: Sim, biome?: BiomeId) {
     this.fx = new FxSystem(ctx.scene, ctx.camera);
-    this.terrain = buildTerrain(sim.map);
+    this.terrain = buildTerrain(sim.map, biomeById(biome));
     ctx.scene.add(this.terrain.group);
     ctx.scene.add(this.placementGroup);
 

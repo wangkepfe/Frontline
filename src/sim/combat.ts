@@ -91,6 +91,10 @@ export interface TargetQuery {
   preferArmor?: boolean;
   preferEconomy?: boolean;
   preferBuildings?: boolean;
+  /** Order cards: hunt these building kinds specifically. Matched kinds are
+   * strongly attracted; other buildings are mildly repelled so the strike force
+   * beelines the objective instead of pecking at whatever building is nearest. */
+  preferKinds?: ReadonlyArray<Building['kind']>;
   needLos?: boolean;
 }
 
@@ -117,6 +121,9 @@ export function acquireTarget(sim: Sim, q: TargetQuery): Combatant | null {
       else if (!isUnit(e) && (e.kind === 'extractor' || e.kind === 'derrick')) score -= 100;
     }
     if (q.preferBuildings && !isUnit(e)) score -= 100;
+    if (q.preferKinds && !isUnit(e)) {
+      score += q.preferKinds.includes(e.kind) ? -300 : 60;
+    }
     // harvesters are low-priority targets for normal combat units
     if (!q.preferEconomy && isUnit(e) && e.kind === 'harvester') score += 50;
     if (score < bestScore) {

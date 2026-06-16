@@ -442,6 +442,9 @@ describe('staff desks (partitioned hand)', () => {
     const p = sim.players[0];
     stepFor(sim, 40); // let the desks fill
     const unitDesk = () => [p.hand[2], p.hand[3]];
+    // the deal ORDER varies per seed — wait until the unit desk actually holds a
+    // proposal to discard before exercising the refresh
+    for (let i = 0; i < 4000 && unitDesk().filter(Boolean).length === 0; i++) sim.step();
     const beforeUids = unitDesk().filter(Boolean).map((s) => s!.uid);
     expect(beforeUids.length).toBeGreaterThan(0);
     const gold = p.gold;
@@ -525,12 +528,15 @@ describe('standing orders', () => {
 
   it('defensive posture pulls attackers back to the HQ perimeter', () => {
     const sim = new Sim(4, L, { rules: { tech: false, hqGun: false } });
-    const rifle = sim.spawnUnit(0, 'rifle', { x: 6, y: 6 }); // aggressive, mid-map
+    const rifle = sim.spawnUnit(0, 'rifle', { x: 9, y: 9 }); // aggressive, open land far from HQ
     give(sim, 'defendorder');
     expect(sim.playCard(0, 4).ok).toBe(true);
-    stepFor(sim, 25);
     const hq = sim.map.hq[0];
-    expect(Math.hypot(rifle.pos.x - hq.c, rifle.pos.y - hq.r)).toBeLessThan(5);
+    const startD = Math.hypot(rifle.pos.x - hq.c, rifle.pos.y - hq.r);
+    stepFor(sim, 25);
+    const endD = Math.hypot(rifle.pos.x - hq.c, rifle.pos.y - hq.r);
+    expect(endD).toBeLessThan(startD); // it pulled back toward the HQ
+    expect(endD).toBeLessThan(5);
   });
 
   it('target-economy marches the army at enemy mines', () => {
@@ -548,6 +554,19 @@ describe('standing orders', () => {
     // under it the mine is the destination — and it comes under fire
     expect(closest).toBeLessThan(2.6);
     expect(mine.hp).toBeLessThan(mine.maxHp);
+  });
+
+  it('target: power grid prioritizes the enemy power plant over a closer building', () => {
+    const sim = new Sim(4, L, { rules: { tech: false, hqGun: false } });
+    const decoy = sim.placeBuilding(1, 'extractor', { c: 5, r: 9 }); // CLOSER, but not the objective
+    const plant = sim.placeBuilding(1, 'powerplant', { c: 7, r: 9 }); // the order's target kind
+    sim.spawnUnit(0, 'rifle', { x: 4, y: 9 });
+    give(sim, 'hitpower');
+    expect(sim.playCard(0, 4).ok).toBe(true);
+    stepFor(sim, 30);
+    // the army beelines the power plant and chews it, ignoring the nearer extractor
+    expect(plant.hp).toBeLessThan(plant.maxHp);
+    expect(decoy.hp).toBe(decoy.maxHp);
   });
 
   it('dispersal order holds wide spacing between own combat units', () => {
@@ -570,29 +589,27 @@ describe('cards & placement', () => {
     return { sim, slot: 0 };
   }
 
-  it('one click auto-builds the extractor on the nearest free gold mine', () => {
+  it('builds the extractor on a clicked gold mine in territory', () => {
     const { sim, slot } = simWithCard('extractor');
-    const res = sim.playCard(0, slot); // no target: the sim picks the site
+    const res = sim.playCard(0, slot, { c: 1, r: 11 }); // click the home gold mine
     expect(res.ok).toBe(true);
     expect(sim.players[0].gold).toBe(500 - CARDS.extractor.gold);
-    const mine = sim.buildings.find((b) => b.kind === 'extractor' && b.team === 0)!;
-    expect(mine.tile).toEqual({ c: 1, r: 11 }); // the safe gold next to HQ A
-  });
-
-  it('auto cards ignore a provided target and still pick the nearest site', () => {
-    const { sim, slot } = simWithCard('extractor');
-    const res = sim.playCard(0, slot, { c: 4, r: 10 }); // plain land click
-    expect(res.ok).toBe(true);
     const mine = sim.buildings.find((b) => b.kind === 'extractor' && b.team === 0)!;
     expect(mine.tile).toEqual({ c: 1, r: 11 });
   });
 
-  it('refuses the play when no free site is in territory', () => {
+  it('refuses the extractor on a non-gold tile', () => {
     const { sim, slot } = simWithCard('extractor');
-    sim.placeBuilding(0, 'extractor', { c: 1, r: 11 }); // take the only home mine
-    const res = sim.playCard(0, slot);
+    const res = sim.playCard(0, slot, { c: 4, r: 10 }); // plain land click
     expect(res.ok).toBe(false);
-    expect(res.reason).toBe('no site');
+    expect(res.reason).toBe('invalid tile');
+  });
+
+  it('needs a target tile to place the extractor', () => {
+    const { sim, slot } = simWithCard('extractor');
+    const res = sim.playCard(0, slot); // no target at all
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe('needs target');
   });
 
   it('every building pushes territory forward', () => {
@@ -779,29 +796,40 @@ describe('tech tree & electricity', () => {
     sim.step();
     expect(bunker.powered).toBe(true);
 
-    // grid collapse: both plants die, every consumer goes dark
+    // grid collapse: both plants die. Emergency power keeps ONE gold mine alive
+    // (the comeback lifeline) but every other consumer goes dark.
     plant1.hp = 0;
     plant2.hp = 0;
     sim.step();
-    expect(mine.powered).toBe(false);
+    expect(mine.powered).toBe(true); // emergency power feeds the lone extractor
+    expect(b1.powered).toBe(false);
     expect(bunker.powered).toBe(false);
   });
 
-  it('an unpowered extractor produces nothing; a powered one pays out', () => {
+  it('emergency power runs one mine without a plant; extra mines stay dark', () => {
     const sim = new Sim(6, L);
-    const mine = sim.placeBuilding(0, 'extractor', { c: 1, r: 11 }); // no plant yet
+    const m1 = sim.placeBuilding(0, 'extractor', { c: 1, r: 11 }); // no plant yet
+    const m2 = sim.placeBuilding(0, 'extractor', { c: 5, r: 10 }); // a second mine
     sim.step();
-    expect(mine.powered).toBe(false);
+    // with no power plant, the HQ back-feeds exactly ONE extractor; the rest dark
+    expect(m1.powered).toBe(true);
+    expect(m2.powered).toBe(false);
     const g0 = sim.players[0].gold;
     stepFor(sim, 10);
-    expect(sim.players[0].gold - g0).toBeLessThan(11); // HQ trickle only
+    // HQ trickle (1/s) + one emergency-powered mine (3/s) ≈ 40 over 10s; the dark
+    // mine pumps nothing
+    const gained = sim.players[0].gold - g0;
+    expect(gained).toBeGreaterThan(30);
+    expect(gained).toBeLessThan(50);
 
+    // a power plant lights the whole grid: both mines now run
     sim.placeBuilding(0, 'powerplant', { c: 3, r: 10 });
     sim.step();
-    expect(mine.powered).toBe(true);
+    expect(m1.powered).toBe(true);
+    expect(m2.powered).toBe(true);
     const g1 = sim.players[0].gold;
     stepFor(sim, 10);
-    expect(sim.players[0].gold - g1).toBeGreaterThan(38); // trickle + 3/s mine
+    expect(sim.players[0].gold - g1).toBeGreaterThan(60); // trickle + 2×3/s mines
   });
 
   it('prebuilt and wave structures are grandfathered: no plant required', () => {

@@ -4,6 +4,7 @@ import {
   deckAsLoadout, battleOptions, battleIntel, battleRewards, shopStock, pickEvent, STARTER_DECK
 } from '../src/campaign/run';
 import { CARDS } from '../src/sim/cards';
+import { GameMap } from '../src/sim/map';
 import { Sim } from '../src/sim/sim';
 import { AiController } from '../src/sim/ai';
 import { MISSIONS } from '../src/tutorial';
@@ -109,6 +110,34 @@ describe('campaign battles', () => {
     }
   });
 
+  it('elite & boss sectors are unbalanced (defender fortress) yet still runnable', () => {
+    const run = newRun(7);
+    const elite = run.nodes.find((n) => n.type === 'elite')!;
+    const boss = run.nodes.find((n) => n.type === 'boss')!;
+    for (const node of [elite, boss]) {
+      const opts = battleOptions(run, node.id);
+      const map = new GameMap(opts.simOptions!.mapLayout!);
+      // the enemy (team 1) defends a fortified, asymmetric sector
+      let asymmetric = false;
+      for (let r = 0; r < map.h && !asymmetric; r++)
+        for (let c = 0; c < map.w; c++)
+          if (map.terrainAt(c, r) !== map.terrainAt(map.w - 1 - c, map.h - 1 - r)) { asymmetric = true; break; }
+      expect(asymmetric, `${node.type} map asymmetric`).toBe(true);
+      expect(map.goldMines.length, `${node.type} extra economy`).toBeGreaterThan(6);
+
+      // and the defender AI can still stand up an economy behind the bastion
+      const sim = new Sim(opts.seed, [opts.playerLoadout, opts.aiLoadout!], opts.simOptions);
+      const ai = new AiController(1, 99, opts.aiProfile!);
+      for (let i = 0; i < 20 * 60 && !sim.result; i++) {
+        ai.update(sim, 0.05);
+        sim.step();
+        sim.events.length = 0;
+      }
+      expect(sim.buildings.filter((b) => b.team === 1).length, `${node.type} defender built`).toBeGreaterThan(1);
+      for (const u of sim.units) expect(Number.isFinite(u.pos.x)).toBe(true);
+    }
+  });
+
   it('rewards offer 3 distinct cards; shop prices scale', () => {
     const run = newRun(11);
     const nodeId = selectableNodes(run)[0];
@@ -143,6 +172,7 @@ describe('tutorial missions', () => {
     const sim = new Sim(55, [opts.playerLoadout, []], opts.simOptions);
     for (let i = 0; i < 20 * 5; i++) sim.step();
     expect(sim.units.filter((u) => u.team === 1).length).toBeGreaterThanOrEqual(2);
-    expect(sim.hqOf(1)!.maxHp).toBe(700);
+    // mission 1's enemy HQ is deliberately low so a few rifle squads end it fast
+    expect(sim.hqOf(1)!.maxHp).toBe(120);
   });
 });

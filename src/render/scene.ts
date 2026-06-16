@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MAP_H, MAP_W } from '../sim/map';
 import { studio } from './art/stage';
+import { biomeById, type BiomeId } from './art/biomes';
 
 /**
  * Fixed isometric-style camera over the whole battlefield. Orthographic, 45° yaw,
@@ -19,13 +20,13 @@ export interface SceneCtx {
   resize: () => void;
 }
 
-export function createScene(container: HTMLElement, viewTeam: 0 | 1 = 0): SceneCtx {
+export function createScene(container: HTMLElement, viewTeam: 0 | 1 = 0, biome?: BiomeId): SceneCtx {
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  studio(renderer, scene, CENTER, 13);
+  studio(renderer, scene, CENTER, 13, biomeById(biome).studio);
 
   // camera southwest of center, looking northeast: the local commander's HQ reads
   // at the bottom. The joiner (team 1) flips to the northeast corner so the board

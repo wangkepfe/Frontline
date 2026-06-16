@@ -104,6 +104,8 @@ export function buildTank(team: TeamId): UnitRigHandle {
     wheels.push(wheel(body, -0.258, 0.062, side * 0.225, 0.05, 0.03, side, true));
     // fender strip above the track — same steel family, one value down
     put(body, cbox(0.6, 0.014, 0.15, 0.006), STEEL_DK(), 0, 0.14, side * 0.155);
+    // side-skirt ribs: steel panels proud of the dark track, breaking the flat skirt face
+    for (const rx of [-0.14, 0, 0.14]) put(body, cbox(0.022, 0.085, 0.012, 0.005), STEEL_DK(), rx, 0.07, side * 0.225);
   }
 
   // hull: belly plate + slab + sloped glacis + rear deck (steel ramp only)
@@ -354,7 +356,7 @@ export function buildHarvester(team: TeamId): UnitRigHandle {
   put(body, cbox(0.17, 0.16, 0.21, 0.022), pm(C.olive.base), 0.175, 0.2, 0);
   put(body, cbox(0.015, 0.07, 0.16, 0.006), GLASS(), 0.262, 0.225, 0); // windshield
   put(body, cbox(0.17, 0.012, 0.21, 0.005), pm(C.olive.shade), 0.175, 0.285, 0); // roof
-  put(body, cbox(0.11, 0.012, 0.13, 0.005), pm(accent.base, 'enamel'), 0.175, 0.294, 0); // team roof panel
+  put(body, cbox(0.09, 0.012, 0.1, 0.005), pm(accent.base, 'enamel'), 0.175, 0.294, 0); // team roof panel (tightened so the olive frame reads as a painted decal, not a half-roof tint)
   put(body, lathe([[0.012, 0], [0.012, 0.1], [0.018, 0.11], [0.0001, 0.12]], 7), GUN_DK(), 0.11, 0.27, -0.085); // exhaust stack
   put(body, cbox(0.02, 0.05, 0.18, 0.008), GUN_DK(), 0.27, 0.11, 0); // front guard
 

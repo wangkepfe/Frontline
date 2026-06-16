@@ -158,6 +158,9 @@ export interface PlayerState {
   /** active team-wide order, null = units follow their own stances */
   order: StandingOrder | null;
   damageDealt: number; // tiebreak metric + stats
+  /** has this team ever fielded a gold mine? gates the emergency fund so it's a
+   *  lost-economy lifeline, never a free boost during the mine-less opening */
+  builtExtractor: boolean;
 }
 
 /** Scripted enemy spawn for tutorial/campaign scenarios. */

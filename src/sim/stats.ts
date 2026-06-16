@@ -9,11 +9,12 @@ export const TICK_DT = 0.05; // 20 Hz fixed-step sim
 export const HAND_SIZE = 6;
 export const INITIAL_HAND = 4;
 // global deal timer: a card arrives every rng(MIN..MAX) seconds regardless of
-// hand state (a full desk wastes the deal). Proposals linger one long TTL, so
-// an idle commander's desks fill up and hold.
+// hand state (a full desk wastes the deal). Proposals linger one TTL — short
+// enough that an unplayed slip is withdrawn before the desk stagnates, so the
+// commander keeps acting instead of hoarding.
 export const DRAW_INTERVAL_MIN = 5.0;
 export const DRAW_INTERVAL_MAX = 6.0;
-export const CARD_TTL = 50;
+export const CARD_TTL = 28;
 export const LOADOUT_SIZE = 16;
 // paid desk refresh: discard a desk's proposals, two fresh ones arrive at once.
 // Each click also slaps a +REFRESH_SURGE temporary surcharge on that desk's
@@ -40,6 +41,13 @@ export const STORE_CAP_OIL = 60;
 export const HQ_INCOME_GOLD = 1; // per second
 export const EXTRACTOR_INCOME = 3; // gold/s
 export const DERRICK_INCOME = 2; // oil/s
+// Emergency economy: a flattened base shouldn't be an instant death spiral.
+// EMERGENCY_POWER: with NO power plant, the HQ back-feeds exactly one gold
+// mine's draw so a destroyed plant still leaves a trickle of income.
+// EMERGENCY_FUND_MULT: once a team has lost its last gold mine (after having
+// built one), the HQ prints gold this many times faster as a comeback lifeline.
+export const EMERGENCY_POWER = 2; // = one extractor's draw
+export const EMERGENCY_FUND_MULT = 5;
 // supply truck service call: docking at a mine/derrick banks its whole silo
 // (the manual collect, automated) and boosts that building for a while
 export const HARVESTER_BOOST = 1.0; // +100% output while the boost timer runs

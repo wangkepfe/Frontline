@@ -156,7 +156,7 @@ function buildHq(team: TeamId): BuildingRigHandle {
   put(radar, cbox(0.05, 0.04, 0.04, 0.01), STEEL(), 0, 0.012, 0); // yoke
   // whip antenna + beacon on the command block
   put(root, lathe([[0.006, 0], [0.005, 0.26], [0.0001, 0.26]], 5), GUN_DK(), -0.2, 0.52, -0.16);
-  put(root, lathe([[0.013, 0], [0.013, 0.02], [0.0001, 0.028]], 6), pm(C.team1.base, 'ore'), -0.2, 0.78, -0.16);
+  put(root, lathe([[0.013, 0], [0.013, 0.02], [0.0001, 0.028]], 6), pm(accent.base, 'ore'), -0.2, 0.78, -0.16); // beacon = team accent (was hardcoded vermilion)
 
   const flagBones = flag(root, team, 0.5, 0.38, -0.34);
   const track = tracker(2.4);
@@ -250,7 +250,7 @@ function buildBarracks(team: TeamId): BuildingRigHandle {
   const door = new THREE.Group();
   door.position.set(0.295, 0.02, -0.045);
   root.add(door);
-  put(door, cbox(0.016, 0.15, 0.12, 0.006), pm(accent.shade, 'enamel'), 0, 0.075, -0.06);
+  put(door, cbox(0.016, 0.15, 0.12, 0.006), pm(accent.base, 'enamel'), 0, 0.075, -0.06); // door = primary team marker (accent.base, matches every other building)
   // drill yard: rifle rack + crates + sandbags
   put(root, cbox(0.16, 0.02, 0.03, 0.008), TIMBER(), 0.1, 0.1, 0.3, { ry: 0.15 });
   for (let i = 0; i < 4; i++) put(root, cbox(0.012, 0.13, 0.012, 0.004), GUN(), 0.045 + i * 0.038, 0.07, 0.3 + (i % 2) * 0.012, { rz: 0.25, ry: 0.15 });
@@ -298,14 +298,16 @@ function buildFactory(team: TeamId): BuildingRigHandle {
     put(root, cbox(0.012, 0.15, 0.56, 0.005), pm(C.glass.base, 'glass'), xo + 0.185, 0.41, 0, { rz: 0.12 });
   }
   put(root, cbox(0.82, 0.025, 0.08, 0.01), pm(accent.base, 'enamel'), -0.04, 0.335, 0.29); // roofline stripe
-  // smokestack
-  put(root, lathe([[0.05, 0], [0.045, 0.3], [0.055, 0.32], [0.05, 0.38], [0.0001, 0.38]], 9), pm(C.ochre.shade, 'matte'), -0.33, 0.32, -0.2);
+  // smokestack: concrete column with a dark open throat (reads industrial, not a wooden bolt)
+  put(root, lathe([[0.05, 0], [0.045, 0.3], [0.055, 0.32], [0.05, 0.38], [0.0001, 0.38]], 9), CONC(), -0.33, 0.32, -0.2);
+  put(root, lathe([[0.045, 0], [0.045, 0.012], [0.0001, 0.012]], 9), pm(C.oil.base, 'matte'), -0.33, 0.7, -0.2); // dark throat at the mouth
+  put(root, lathe([[0.057, 0], [0.057, 0.022], [0.0001, 0.022]], 9), pm(accent.shade, 'enamel'), -0.33, 0.58, -0.2); // service band
   // vehicle gate (front +X): slides up while producing
   put(root, cbox(0.025, 0.26, 0.34, 0.01), STEEL_LT(), 0.37, 0.15, 0); // gate frame
   const gate = new THREE.Group();
   gate.position.set(0.378, 0, 0);
   root.add(gate);
-  put(gate, cbox(0.018, 0.2, 0.28, 0.008), GUN_DK(), 0, 0.11, 0);
+  put(gate, cbox(0.018, 0.2, 0.28, 0.008), STEEL_DK(), 0, 0.11, 0); // dark steel shutter (STEEL_DK reads as panel, not a pure-black void)
   put(gate, cbox(0.018, 0.04, 0.28, 0.008), pm(accent.shade, 'enamel'), 0.004, 0.025, 0); // hazard skirt
   // roof gantry crane: traverses while producing
   const rail = put(root, cbox(0.04, 0.03, 0.66, 0.012), STEEL_LT(), 0.05, 0.55, 0);
@@ -339,8 +341,8 @@ function buildExtractor(team: TeamId): BuildingRigHandle {
 
   // spoil pile with gold flecks + shaft collar under the frame
   put(root, rock(0.2, 21, 0.42), pm(C.ochre.base, 'matte'), -0.22, 0.02, 0.26);
-  put(root, rock(0.05, 22, 0.7), pm(C.ore.base, 'ore'), -0.16, 0.035, 0.2);
-  put(root, rock(0.04, 23, 0.7), pm(C.ore.lit, 'ore'), -0.28, 0.03, 0.32);
+  put(root, rock(0.05, 22, 0.7), pm(C.ore.base, 'ore'), -0.12, 0.07, 0.16); // gold fleck lifted onto the lit SW shoulder of the spoil pile
+  put(root, rock(0.04, 23, 0.7), pm(C.ore.lit, 'ore'), -0.26, 0.065, 0.34);
   put(root, lathe([[0.14, 0], [0.14, 0.05], [0.115, 0.05], [0.115, 0.012], [0.0001, 0.012]], 10), CONC_DK(), 0.02, 0, 0);
 
   // headframe: two solid tapered truss panels carrying a BIG sheave wheel

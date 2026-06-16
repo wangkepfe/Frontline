@@ -118,7 +118,7 @@ function makeSoldier(team: TeamId, kind: 'rifle' | 'gunner' | 'loader', seed: nu
     rifle.position.set(0.042, -0.002, 0.008);
     arms.add(rifle);
     put(rifle, cbox(0.055, 0.026, 0.016, 0.005), GUNDARK(), -0.02, -0.002, 0); // stock + receiver
-    put(rifle, cbox(0.1, 0.0145, 0.0135, 0.004), GUNMETAL(), 0.052, 0.003, 0); // barrel + handguard
+    put(rifle, cbox(0.1, 0.019, 0.018, 0.004), GUNMETAL(), 0.052, 0.003, 0); // barrel + handguard (cleared the ~0.018 anti-alias floor)
     put(rifle, cbox(0.013, 0.026, 0.012, 0.004), GUNDARK(), 0.014, -0.024, 0); // magazine
   } else if (kind === 'gunner') {
     put(arms, cbox(0.05, 0.018, 0.018, 0.005), FATIGUE(), 0.024, 0.016, -0.014, { ry: -0.2, rz: 0.5 }); // right arm up to tube
@@ -129,7 +129,7 @@ function makeSoldier(team: TeamId, kind: 'rifle' | 'gunner' | 'loader', seed: nu
     arms.add(tube);
     put(tube, lathe([[0.0145, 0], [0.0145, 0.2], [0.019, 0.205], [0.019, 0.225], [0.0001, 0.225]], 9), GUNMETAL(), -0.06, 0, 0, { rz: -Math.PI / 2 }); // tube, muzzle +X
     put(tube, lathe([[0.0185, 0], [0.0185, 0.03], [0.0001, 0.03]], 9), GUNDARK(), -0.075, 0, 0, { rz: -Math.PI / 2 }); // exhaust flare
-    put(tube, lathe([[0.012, 0], [0.017, 0.012], [0.0001, 0.034]], 9), pm(accent.base, 'enamel'), 0.165, 0, 0, { rz: -Math.PI / 2 }); // warhead tip = team read
+    put(tube, lathe([[0.019, 0], [0.021, 0.014], [0.0001, 0.04]], 9), pm(accent.base, 'enamel'), 0.165, 0, 0, { rz: -Math.PI / 2 }); // warhead tip = team read (base seats flush on the tube mouth)
   } else {
     // loader: hands free, carries a spare rocket across the chest
     put(arms, cbox(0.05, 0.017, 0.017, 0.005), FATIGUE(), 0.022, -0.004, 0.022, { ry: 0.4 });

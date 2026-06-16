@@ -1,10 +1,16 @@
 import type { Sim } from '../sim/sim';
-import { CARDS, CATEGORY_SLOTS, HandCategory, tierRequirement } from '../sim/cards';
-import { BUILDING_STATS, ESCALATE_DRAW_T, HAND_SIZE, NUKE_UNLOCK_T, ORDER_DURATION, REFRESH_COST } from '../sim/stats';
+import { CARDS, CATEGORY_SLOTS, HandCategory, slotCategory, tierRequirement } from '../sim/cards';
+import { BUILDING_STATS, CARD_TTL, ESCALATE_DRAW_T, HAND_SIZE, NUKE_UNLOCK_T, ORDER_DURATION, REFRESH_COST } from '../sim/stats';
 import { renderCardFaceInto } from './cardFace';
 import { icon } from './icons';
 import { OfficerRole, officerPortrait } from './officers';
-import type { OrderKind, TeamId } from '../sim/types';
+import type { HandSlot, OrderKind, PlayerState, TeamId } from '../sim/types';
+
+/** below this much TTL a proposal is "nearly withdrawn": red stamp + blink */
+const EXPIRING_AT = 6;
+/** discard drop+fade, and the empty-desk beat before the fresh card flies in */
+const DISCARD_MS = 280;
+const DEAL_GAP_MS = 130;
 
 const ORDER_LABELS: Record<OrderKind, string> = {
   defend: 'DEFENSIVE POSTURE',
@@ -28,7 +34,14 @@ export class Hud {
 
   private root: HTMLElement;
   private slots: HTMLElement[] = [];
-  private slotUids: number[] = new Array(HAND_SIZE).fill(-1);
+  /** the officer portrait each desk's proposals scale out of when dealt */
+  private portraits: Record<HandCategory, HTMLElement | null> = { building: null, unit: null, action: null };
+  /** per-slot desk-animation bookkeeping (see reconcileSlot) */
+  private faceUid: number[] = new Array(HAND_SIZE).fill(-1); // uid live in the DOM (-1 = empty)
+  private ackUid: number[] = new Array(HAND_SIZE).fill(-1); // latest sim uid reacted to
+  private dealTimer: number[] = new Array(HAND_SIZE).fill(0); // s until a held card flies in
+  private pending: (HandSlot | null)[] = new Array(HAND_SIZE).fill(null);
+  private slotAnim: (Animation | null)[] = new Array(HAND_SIZE).fill(null);
   private refreshBtns = new Map<HandCategory, HTMLButtonElement>();
   private refreshCosts = new Map<HandCategory, HTMLElement>();
   private toastEl: HTMLElement;
@@ -70,9 +83,15 @@ export class Hud {
         });
         desks[cat].appendChild(el);
         this.slots[i] = el;
-        this.slotUids[i] = -1;
       }
     }
+
+    // each desk's cards are dealt out of its officer's profile portrait
+    this.portraits = {
+      building: document.querySelector('#post-build .portrait'),
+      unit: document.querySelector('#post-units .portrait'),
+      action: document.querySelector('#post-actions .portrait')
+    };
 
     for (const [id, cat] of [
       ['refresh-building', 'building'],
@@ -99,6 +118,20 @@ export class Hud {
     } else {
       el.classList.add('hidden');
     }
+  }
+
+  /** Screen rect of the hand slot currently showing card `cardId`, or null
+   *  (empty/mid-deal). Lets the tutorial arrow point at a specific proposal. */
+  slotRectForCard(sim: Sim, cardId: string): DOMRect | null {
+    const hand = sim.players[this.localTeam].hand;
+    for (let i = 0; i < HAND_SIZE; i++) {
+      const s = hand[i];
+      if (s && this.faceUid[i] === s.uid && s.card.id === cardId) {
+        const r = this.slots[i].getBoundingClientRect();
+        return r.width > 0 ? r : null;
+      }
+    }
+    return null;
   }
 
   showHint(text: string | null): void {
@@ -160,6 +193,121 @@ export class Hud {
     this.toastTimer = 1.6;
   }
 
+  /**
+   * Drive one desk slot's deal/discard lifecycle from sim state. A slot can be
+   * empty→card (deal in), card→empty (discard out), or card→other-card (a
+   * refresh/swap: discard, hold the desk empty a beat, then deal the fresh one).
+   */
+  private reconcileSlot(i: number, slot: HandSlot | null, dtFrame: number): void {
+    const tUid = slot ? slot.uid : -1;
+    if (tUid !== this.ackUid[i]) {
+      this.ackUid[i] = tUid;
+      this.pending[i] = null;
+      this.dealTimer[i] = 0;
+      const hadFace = this.faceUid[i] !== -1;
+      if (hadFace) this.discardSlot(i);
+      if (slot) {
+        if (hadFace) {
+          // refresh / swap: empty desk for a beat, then fly the fresh card in
+          this.pending[i] = slot;
+          this.dealTimer[i] = (DISCARD_MS + DEAL_GAP_MS) / 1000;
+        } else {
+          this.dealSlot(i, slot); // empty desk: deal straight in
+        }
+      }
+    } else if (this.dealTimer[i] > 0) {
+      this.dealTimer[i] -= dtFrame;
+      if (this.dealTimer[i] <= 0 && this.pending[i]) {
+        if (slot && slot.uid === this.pending[i]!.uid) this.dealSlot(i, slot);
+        this.pending[i] = null;
+        this.dealTimer[i] = 0;
+      }
+    }
+  }
+
+  /** render a freshly dealt card and scale + spin it out of the desk's officer */
+  private dealSlot(i: number, slot: HandSlot): void {
+    const el = this.slots[i];
+    this.slotAnim[i]?.cancel();
+    el.className = slot.card.up ? 'card up' : 'card';
+    renderCardFaceInto(el, slot.card.id, slot.card.up, i);
+    this.faceUid[i] = slot.uid;
+    const portrait = this.portraits[slotCategory(i)];
+    const sr = el.getBoundingClientRect();
+    if (portrait && sr.width > 0) {
+      const pr = portrait.getBoundingClientRect();
+      const dx = pr.left + pr.width / 2 - (sr.left + sr.width / 2);
+      const dy = pr.top + pr.height / 2 - (sr.top + sr.height / 2);
+      this.slotAnim[i] = el.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px) scale(0.05) rotate(-540deg)`, opacity: 0, offset: 0 },
+          { transform: `translate(${dx * 0.16}px, ${dy * 0.16}px) scale(0.62) rotate(-150deg)`, opacity: 1, offset: 0.62 },
+          { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1, offset: 1 }
+        ],
+        { duration: 500, easing: 'cubic-bezier(0.22, 0.85, 0.3, 1.05)' }
+      );
+    } else {
+      this.slotAnim[i] = el.animate(
+        [{ opacity: 0, transform: 'translateY(22px) scale(0.85)' }, { opacity: 1, transform: 'none' }],
+        { duration: 280, easing: 'ease-out' }
+      );
+    }
+  }
+
+  /** drop the outgoing proposal down off the desk and fade it out */
+  private discardSlot(i: number): void {
+    const el = this.slots[i];
+    this.faceUid[i] = -1;
+    this.slotAnim[i]?.cancel();
+    const anim = el.animate(
+      [
+        { transform: 'translateY(0) rotate(0deg)', opacity: 1, offset: 0 },
+        { transform: 'translateY(48px) rotate(5deg)', opacity: 0, offset: 1 }
+      ],
+      { duration: DISCARD_MS, easing: 'cubic-bezier(0.4, 0.05, 0.7, 1)', fill: 'forwards' }
+    );
+    this.slotAnim[i] = anim;
+    anim.onfinish = () => {
+      if (this.faceUid[i] !== -1) return; // a newer card already claimed the desk
+      el.className = 'card empty';
+      el.dataset.key = String(i + 1);
+      el.innerHTML = '';
+      el.style.removeProperty('--ttlfrac');
+      anim.cancel(); // drop the forwards-fill so the empty plate sits clean
+    };
+  }
+
+  /** per-frame upkeep for a live card face: ttl stamp + bar, lock/afford/expiry */
+  private paintFace(
+    i: number,
+    slot: HandSlot,
+    p: PlayerState,
+    tech: boolean,
+    live: { powerplant: boolean; extractor: boolean; derrick: boolean }
+  ): void {
+    const el = this.slots[i];
+    const def = CARDS[slot.card.id];
+    const req = tierRequirement(def);
+    const locked = tech && req !== null && !live[req as keyof typeof live];
+    const affordable =
+      p.gold >= def.gold &&
+      p.oil >= def.oil &&
+      (def.kind !== 'upgrade' || !p.upgrades.has(def.upgrade!));
+    el.classList.toggle('locked', locked);
+    el.classList.toggle('unaffordable', !locked && !affordable);
+    el.classList.toggle('expiring', slot.ttl < EXPIRING_AT);
+    el.classList.toggle('armed', i === this.armedSlot);
+    // the proposal's expiry stamp — a typed countdown, not a dial
+    const ttlEl = el.querySelector('.ttl b') as HTMLElement | null;
+    if (ttlEl) {
+      const t = Math.max(0, slot.ttl);
+      const label = `${Math.floor(t / 60)}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
+      if (ttlEl.textContent !== label) ttlEl.textContent = label;
+    }
+    // the draining time bar (fraction of a full TTL still left)
+    el.style.setProperty('--ttlfrac', String(Math.max(0, Math.min(1, slot.ttl / CARD_TTL))));
+  }
+
   update(sim: Sim, dtFrame: number): void {
     const team = this.localTeam;
     const p = sim.players[team];
@@ -170,42 +318,11 @@ export class Hud {
       derrick: tech && sim.hasLiveBuilding(team, 'derrick')
     };
 
-    // desks
+    // desks: deal-in / discard-out animation lifecycle, then live-face upkeep
     for (let i = 0; i < HAND_SIZE; i++) {
+      this.reconcileSlot(i, p.hand[i], dtFrame);
       const slot = p.hand[i];
-      const el = this.slots[i];
-      if (!slot) {
-        if (this.slotUids[i] !== -1) {
-          this.slotUids[i] = -1;
-          el.className = 'card empty';
-          el.innerHTML = '';
-        }
-        continue;
-      }
-      if (slot.uid !== this.slotUids[i]) {
-        this.slotUids[i] = slot.uid;
-        el.className = slot.card.up ? 'card up deal' : 'card deal';
-        renderCardFaceInto(el, slot.card.id, slot.card.up, i);
-        requestAnimationFrame(() => el.classList.remove('deal'));
-      }
-      const def = CARDS[slot.card.id];
-      const req = tierRequirement(def);
-      const locked = tech && req !== null && !live[req as keyof typeof live];
-      const affordable =
-        p.gold >= def.gold &&
-        p.oil >= def.oil &&
-        (def.kind !== 'upgrade' || !p.upgrades.has(def.upgrade!));
-      el.classList.toggle('locked', locked);
-      el.classList.toggle('unaffordable', !locked && !affordable);
-      el.classList.toggle('expiring', slot.ttl < 6);
-      el.classList.toggle('armed', i === this.armedSlot);
-      // the proposal's expiry stamp — a typed countdown, not a dial
-      const ttlEl = el.querySelector('.ttl b') as HTMLElement | null;
-      if (ttlEl) {
-        const t = Math.max(0, slot.ttl);
-        const label = `${Math.floor(t / 60)}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
-        if (ttlEl.textContent !== label) ttlEl.textContent = label;
-      }
+      if (slot && this.faceUid[i] === slot.uid) this.paintFace(i, slot, p, tech, live);
     }
 
     // desk refresh buttons price in live: base cost plus every still-cooling

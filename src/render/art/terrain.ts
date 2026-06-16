@@ -1,13 +1,20 @@
 import * as THREE from 'three';
 import { GameMap, MAP_H, MAP_W } from '../../sim/map';
-import { C, pm, vertexMat } from './palette';
-import { bake, blob, cbox, hash, hull, lathe, mergeChunk, rock } from './kit';
+import { C, vertexMat } from './palette';
+import { bake, cbox, hash, hull, lathe, mergeChunk, rock } from './kit';
+import { Biome, TEMPERATE, TerrainKind } from './biomes';
 
 /**
  * The war table. All static terrain bakes into ONE vertex-colored merged mesh
  * (a single draw call); the board sits as a raised diorama block on a timber
  * table frame, with cut-earth cliff skirts at the edges. The only motion is
  * the river's slow drift — the world breathes, nothing performs.
+ *
+ * The board STRUCTURE (slabs, bridges, banks, skirts, gold/oil seams) is biome-
+ * agnostic; a `biome` descriptor (art/biomes.ts) supplies the slab tones, flora,
+ * mountain clusters, land detail and water sheet. The default TEMPERATE biome
+ * reproduces the original art byte-for-byte, so skirmish/tutorial/MP are
+ * unchanged — biome is a render-only concern and never reaches the sim.
  */
 
 export const TILE_TOP = 0.1;
@@ -17,66 +24,11 @@ export interface TerrainHandle {
   update: (dt: number) => void;
 }
 
-// ── water texture (painted streaks, drifts via uv offset) ───────────────────
-
-function waterTexture(): THREE.CanvasTexture {
-  const W = 256, H = 64;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d')!;
-  const base = ctx.createLinearGradient(0, 0, 0, H);
-  base.addColorStop(0, '#2a5d68');
-  base.addColorStop(0.5, '#2e6470');
-  base.addColorStop(1, '#27545f');
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, W, H);
-  // current streaks
-  for (let i = 0; i < 26; i++) {
-    const y = hash(i, 3) * H;
-    const len = 24 + hash(i, 5) * 60;
-    const x = hash(i, 7) * W;
-    ctx.fillStyle = i % 3 === 0 ? 'rgba(216,205,169,0.16)' : 'rgba(120,190,200,0.13)';
-    ctx.fillRect(x, y, len, 1.6 + hash(i, 9) * 1.6);
-    if (x + len > W) ctx.fillRect(x - W, y, len, 1.5); // wrap seam
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.repeat.set(2.2, 1);
-  return tex;
-}
-
-// ── flora & props (baked pieces) ────────────────────────────────────────────
-
 type Piece = THREE.BufferGeometry;
-
-/** Deciduous: tapered trunk + 2-tone canopy (shadow mass + lit cap). */
-function bakeTree(out: Piece[], x: number, z: number, seed: number, scale: number): void {
-  const trunkH = 0.16 * scale;
-  out.push(bake(lathe([[0.028, 0], [0.018, trunkH], [0.0001, trunkH]], 6), C.timber.shade, x, TILE_TOP, z));
-  out.push(bake(blob(0.155, (seed % 7) + 1, 0.82), C.canopy.base, x, TILE_TOP + trunkH + 0.1 * scale, z, hash(seed, 1) * Math.PI, scale));
-  out.push(
-    bake(blob(0.095, (seed % 5) + 11, 0.8), C.canopy.lit, x - 0.035 * scale, TILE_TOP + trunkH + 0.16 * scale, z - 0.02 * scale, hash(seed, 2) * Math.PI, scale)
-  );
-}
-
-/** Conifer: stacked cones, darker. */
-function bakeConifer(out: Piece[], x: number, z: number, seed: number, scale: number): void {
-  out.push(bake(lathe([[0.024, 0], [0.016, 0.1], [0.0001, 0.1]], 6), C.timber.shade, x, TILE_TOP, z, 0, scale));
-  const tones = [C.canopy.shade, C.canopy.base, C.canopy.lit];
-  for (let i = 0; i < 3; i++) {
-    const r = (0.14 - i * 0.035) * scale;
-    const h = 0.14 * scale;
-    const y = TILE_TOP + (0.07 + i * 0.085) * scale;
-    out.push(bake(lathe([[r, 0], [0.0001, h]], 7), tones[Math.min(i, 2)], x, y, z, hash(seed, 20 + i) * Math.PI));
-  }
-}
 
 // ── the board ───────────────────────────────────────────────────────────────
 
-export function buildTerrain(map: GameMap): TerrainHandle {
+export function buildTerrain(map: GameMap, biome: Biome = TEMPERATE): TerrainHandle {
   const group = new THREE.Group();
   const pieces: Piece[] = [];
   const cx = (MAP_W - 1) / 2;
@@ -88,41 +40,20 @@ export function buildTerrain(map: GameMap): TerrainHandle {
   pieces.push(bake(cbox(frameW - 0.5, 0.1, MAP_H + 1.2, 0.03), C.oil.base, cx, -0.09, cz));
 
   // ── tiles ──
-  const sandTones = [C.sand.base, C.sand.lit, C.sand.shade];
   for (let r = 0; r < MAP_H; r++) {
     for (let c = 0; c < MAP_W; c++) {
-      const t = map.terrainAt(c, r);
+      const t = map.terrainAt(c, r) as TerrainKind;
       if (t === 'water') continue; // the river handles itself
 
       const slabH = 0.1 + hash(c, r, 7) * 0.025;
-      const groundTone =
-        t === 'forest' ? (hash(c, r) > 0.5 ? C.sage.base : C.sage.shade) :
-        t === 'mountain' ? C.crag.shade :
-        t === 'oil' ? C.sage.shade :
-        sandTones[Math.floor(hash(c, r) * 2.99)];
       if (t !== 'bridge') {
-        pieces.push(bake(cbox(0.985, slabH, 0.985, 0.02), groundTone, c, TILE_TOP - slabH / 2, r));
+        pieces.push(bake(cbox(0.985, slabH, 0.985, 0.02), biome.slab(t, c, r), c, TILE_TOP - slabH / 2, r));
       }
 
       if (t === 'forest') {
-        const n = 3 + Math.floor(hash(c, r, 1) * 2);
-        for (let i = 0; i < n; i++) {
-          const q = i % 4;
-          const px = c + (q % 2 === 0 ? -0.22 : 0.22) + (hash(c, r, 20 + i) - 0.5) * 0.3;
-          const pz = r + (q < 2 ? -0.22 : 0.22) + (hash(c, r, 30 + i) - 0.5) * 0.3;
-          const scale = 0.75 + hash(c, r, 10 + i) * 0.5;
-          if (hash(c, r, 40 + i) < 0.6) bakeTree(pieces, px, pz, c * 31 + r * 7 + i, scale);
-          else bakeConifer(pieces, px, pz, c * 17 + r * 13 + i, scale);
-        }
+        biome.flora(pieces, c, r);
       } else if (t === 'mountain') {
-        // crag cluster: two spires + a weathered ochre stratum boulder + scree
-        const h1 = 1.35 + hash(c, r, 50) * 0.55;
-        pieces.push(bake(rock(0.3, (c * 7 + r) % 13 + 1, h1), C.crag.base, c + (hash(c, r, 51) - 0.5) * 0.3, TILE_TOP + 0.12, r + (hash(c, r, 52) - 0.5) * 0.3, hash(c, r, 53) * Math.PI));
-        pieces.push(bake(rock(0.22, (c * 11 + r) % 13 + 2, h1 * 0.75), C.crag.lit, c + (hash(c, r, 54) - 0.5) * 0.5, TILE_TOP + 0.08, r + (hash(c, r, 55) - 0.5) * 0.5, hash(c, r, 56) * Math.PI));
-        pieces.push(bake(rock(0.13, (c * 5 + r) % 13 + 3, 0.9), C.ochre.shade, c + (hash(c, r, 57) - 0.5) * 0.6, TILE_TOP + 0.04, r + (hash(c, r, 58) - 0.5) * 0.6));
-        for (let i = 0; i < 3; i++) {
-          pieces.push(bake(rock(0.045, i + 4, 0.7), C.crag.shade, c + (hash(c, r, 60 + i) - 0.5) * 0.8, TILE_TOP + 0.01, r + (hash(c, r, 70 + i) - 0.5) * 0.8));
-        }
+        biome.mountain(pieces, c, r);
       } else if (t === 'gold') {
         // crystalline seam: faceted nuggets + one standing crystal
         for (let i = 0; i < 4; i++) {
@@ -157,16 +88,7 @@ export function buildTerrain(map: GameMap): TerrainHandle {
           pieces.push(bake(rock(0.035, i + 13, 0.55), C.oil.lit, c + (hash(c, r, 170 + i) - 0.5) * 0.5, TILE_TOP + 0.008, r + (hash(c, r, 180 + i) - 0.5) * 0.5));
         }
       } else if (t === 'land') {
-        // sparse life so open ground isn't dead flat
-        const v = hash(c, r, 200);
-        if (v < 0.07) {
-          pieces.push(bake(rock(0.05 + v * 0.4, (c + r * 3) % 11 + 1, 0.7), C.crag.lit, c + (hash(c, r, 210) - 0.5) * 0.6, TILE_TOP + 0.015, r + (hash(c, r, 211) - 0.5) * 0.6));
-        } else if (v < 0.2) {
-          // grass tuft: 3 tiny cones
-          for (let i = 0; i < 3; i++) {
-            pieces.push(bake(lathe([[0.018, 0], [0.0001, 0.05 + hash(c, r, 220 + i) * 0.03]], 5), i === 1 ? C.sage.lit : C.sage.base, c + (hash(c, r, 230 + i) - 0.5) * 0.5, TILE_TOP, r + (hash(c, r, 240 + i) - 0.5) * 0.5));
-          }
-        }
+        biome.landDetail(pieces, c, r);
       }
 
       if (t === 'bridge') {
@@ -210,16 +132,16 @@ export function buildTerrain(map: GameMap): TerrainHandle {
     );
   };
   // (edges run clockwise so outward normals face away from the board)
-  pieces.push(bake(skirt(-0.49, -0.49, MAP_W - 0.51, -0.49, 'sk|n'), C.crag.shade, 0, 0, 0));
-  pieces.push(bake(skirt(MAP_W - 0.51, -0.49, MAP_W - 0.51, MAP_H - 0.51, 'sk|e'), C.crag.base, 0, 0, 0));
-  pieces.push(bake(skirt(MAP_W - 0.51, MAP_H - 0.51, -0.49, MAP_H - 0.51, 'sk|s'), C.crag.shade, 0, 0, 0));
-  pieces.push(bake(skirt(-0.49, MAP_H - 0.51, -0.49, -0.49, 'sk|w'), C.crag.base, 0, 0, 0));
+  pieces.push(bake(skirt(-0.49, -0.49, MAP_W - 0.51, -0.49, 'sk|n'), biome.skirt[0], 0, 0, 0));
+  pieces.push(bake(skirt(MAP_W - 0.51, -0.49, MAP_W - 0.51, MAP_H - 0.51, 'sk|e'), biome.skirt[1], 0, 0, 0));
+  pieces.push(bake(skirt(MAP_W - 0.51, MAP_H - 0.51, -0.49, MAP_H - 0.51, 'sk|s'), biome.skirt[0], 0, 0, 0));
+  pieces.push(bake(skirt(-0.49, MAP_H - 0.51, -0.49, -0.49, 'sk|w'), biome.skirt[1], 0, 0, 0));
 
   // ── river: one merged water sheet with world-mapped UVs (any layout) ──
-  const waterTex = waterTexture();
+  const waterTex = biome.water.texture();
   waterTex.wrapT = THREE.RepeatWrapping;
   waterTex.repeat.set(1, 1);
-  const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: 0.45, metalness: 0.05 });
+  const waterMat = new THREE.MeshStandardMaterial({ map: waterTex, roughness: biome.water.roughness, metalness: biome.water.metalness });
   const waterPieces: THREE.BufferGeometry[] = [];
   const isWet = (c: number, r: number): boolean => {
     if (!map.inBounds(c, r)) return true; // the river runs off the table edge
@@ -256,8 +178,8 @@ export function buildTerrain(map: GameMap): TerrainHandle {
       for (const [dc, dr, ry] of dirs) {
         if (!isWet(c + dc, r + dr)) {
           // bank hangs off the dry neighbor's edge, sloping toward this tile
-          pieces.push(bake(bankGeo, C.ochre.base, c + dc, 0, r + dr, ry + Math.PI));
-          pieces.push(bake(cbox(1.0, 0.012, 0.05, 0.005), C.foam.base, c + dc * 0.36, 0.012, r + dr * 0.36, ry));
+          pieces.push(bake(bankGeo, biome.bank, c + dc, 0, r + dr, ry + Math.PI));
+          pieces.push(bake(cbox(1.0, 0.012, 0.05, 0.005), biome.foam, c + dc * 0.36, 0.012, r + dr * 0.36, ry));
         }
       }
     }
@@ -272,7 +194,7 @@ export function buildTerrain(map: GameMap): TerrainHandle {
   }
 
   function update(dt: number): void {
-    waterTex.offset.x += dt * 0.012; // the river drifts, nothing else stirs
+    waterTex.offset.x += dt * biome.water.drift; // the river drifts (frozen ice = 0)
   }
 
   return { group, update };

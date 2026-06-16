@@ -10,7 +10,8 @@ import {
 } from './cards';
 import {
   AIRSTRIKE, BUILDING_STATS, CARD_TTL, COLLECT_STEP, CONVOY_BOOST_DURATION, DERRICK_INCOME,
-  DRAW_INTERVAL_MAX, DRAW_INTERVAL_MIN, ESCALATE_DRAW_MULT, ESCALATE_DRAW_T, EXTRACTOR_INCOME,
+  DRAW_INTERVAL_MAX, DRAW_INTERVAL_MIN, EMERGENCY_FUND_MULT, EMERGENCY_POWER, ESCALATE_DRAW_MULT,
+  ESCALATE_DRAW_T, EXTRACTOR_INCOME,
   FORGE_BUILDING, FORGE_STRIKE, FORGE_UNIT, HARVESTER_BOOST, HQ_INCOME_GOLD, INITIAL_HAND, NUKE,
   NUKE_REDEAL, NUKE_UNLOCK_T, ORDER_DURATION, REFRESH_COST, REFRESH_DEAL, REFRESH_SURGE,
   REFRESH_SURGE_DECAY, STORE_CAP_GOLD, STORE_CAP_OIL, TICK_DT, TIER_UNLOCK_DEAL, UNIT_STATS
@@ -28,6 +29,11 @@ type LoadoutInput = Array<string | CardRef>;
 
 function normalizeLoadout(input: LoadoutInput): CardRef[] {
   return input.map((e) => (typeof e === 'string' ? { id: e, up: false } : { id: e.id, up: e.up }));
+}
+
+/** identity of a card instance for grouping (deal spread, spent-copy counting) */
+function cardRefKey(c: CardRef): string {
+  return `${c.id}|${c.up ? 1 : 0}`;
 }
 
 export class Sim {
@@ -113,7 +119,8 @@ export class Sim {
       drawTimer: DRAW_INTERVAL_MIN,
       refreshSurge: { building: [], unit: [], action: [] },
       order: null,
-      damageDealt: 0
+      damageDealt: 0,
+      builtExtractor: false
     };
   }
 
@@ -124,20 +131,22 @@ export class Sim {
   }
 
   /**
-   * A card is dealable unless (a) tech rules lock its tier, or (b) it auto-
-   * places and no valid site exists right now — a Gold Extractor with every
-   * in-territory mine taken waits in the queue instead of clogging the hand.
+   * A card is dealable unless (a) tech rules lock its tier, or (b) it builds on
+   * a resource node and no free one exists right now — a Gold Extractor with
+   * every in-territory mine taken waits in the queue instead of clogging the
+   * hand (the player would only get a "no free mine" toast).
    */
   private dealable(team: TeamId, ref: CardRef): boolean {
     const def = CARDS[ref.id];
     if (!def) return true;
-    if (def.auto && !this.autoPlaceTile(team, def)) return false;
+    if ((def.place === 'gold' || def.place === 'oil') && !this.autoPlaceTile(team, def)) return false;
     if (!this.rules.tech) return true;
     const req = tierRequirement(def);
     return !req || this.hasLiveBuilding(team, req);
   }
 
-  /** where a one-click card would build: the nearest valid site to the HQ */
+  /** the nearest valid site to the HQ for a placement card (site-existence probe
+   *  for dealable(); the AI also seeds its own placement search from the HQ) */
   autoPlaceTile(team: TeamId, card: CardDef): TilePos | null {
     return nearestValidTile(this, team, card, this.map.hq[team]);
   }
@@ -149,20 +158,19 @@ export class Sim {
    * hand — back into the queue so the ladder is always climbable again.
    */
   private recycleSpent(p: PlayerState): void {
-    const key = (c: CardRef) => `${c.id}|${c.up ? 1 : 0}`;
     const counts = new Map<string, { n: number; ref: CardRef }>();
     for (const c of p.loadout) {
-      const e = counts.get(key(c));
+      const e = counts.get(cardRefKey(c));
       if (e) e.n++;
-      else counts.set(key(c), { n: 1, ref: c });
+      else counts.set(cardRefKey(c), { n: 1, ref: c });
     }
     for (const c of p.queue) {
-      const e = counts.get(key(c));
+      const e = counts.get(cardRefKey(c));
       if (e) e.n--;
     }
     for (const s of p.hand) {
       if (!s) continue;
-      const e = counts.get(key(s.card));
+      const e = counts.get(cardRefKey(s.card));
       if (e) e.n--;
     }
     const spent: CardRef[] = [];
@@ -183,7 +191,7 @@ export class Sim {
     if (p.hand.every((s) => s !== null)) return false;
     if (p.loadout.length === 0) return false;
     if (p.queue.length === 0) {
-      p.queue = this.rng.shuffle(p.loadout.map((c) => ({ ...c })));
+      p.queue = this.rng.spread(p.loadout.map((c) => ({ ...c })), cardRefKey);
     }
     // tier gate + desk gate: deal the first unlocked card whose desk has room;
     // locked cards and cards for a full desk wait in the queue
@@ -228,7 +236,7 @@ export class Sim {
         p.hand[i] = null; // silent discard — the fresh deals make the noise
       }
     }
-    if (discarded.length > 0) p.queue = this.rng.shuffle([...p.queue, ...discarded]);
+    if (discarded.length > 0) p.queue = this.rng.spread([...p.queue, ...discarded], cardRefKey);
     for (let n = 0; n < REFRESH_DEAL; n++) {
       const slot = CATEGORY_SLOTS[cat].find((i) => p.hand[i] === null);
       if (slot === undefined) break;
@@ -338,6 +346,7 @@ export class Sim {
       powered: true,
       freePower: gratis
     };
+    if (kind === 'extractor') this.players[team].builtExtractor = true;
     this.buildings.push(b);
     this.blocked[this.map.idx(tile.c, tile.r)] = 1;
     // shove any units standing on the construction site to an adjacent tile
@@ -395,11 +404,6 @@ export class Sim {
       return { ok: true }; // units always muster at the HQ — no targeting
     }
     if (card.kind === 'upgrade' && p.upgrades.has(card.upgrade!)) return { ok: false, reason: 'owned' };
-    if (card.auto) {
-      // one-click cards pick their own tile; they only need a site to exist
-      if (!this.autoPlaceTile(team, card)) return { ok: false, reason: 'no site' };
-      return { ok: true };
-    }
     if (card.place !== 'none') {
       if (!target) return { ok: false, reason: 'needs target' };
       if (!isValidPlacement(this, team, card, target.c, target.r)) return { ok: false, reason: 'invalid tile' };
@@ -432,9 +436,7 @@ export class Sim {
 
     switch (card.kind) {
       case 'building': {
-        // auto cards ignore any provided target: the sim picks the site
-        const tile = card.auto ? this.autoPlaceTile(team, card)! : target!;
-        this.placeBuilding(team, card.building!, tile, card.buildingMods ?? {}, forged);
+        this.placeBuilding(team, card.building!, target!, card.buildingMods ?? {}, forged);
         break;
       }
       case 'unit': {
@@ -533,11 +535,20 @@ export class Sim {
    */
   private allocatePower(): void {
     const left: [number, number] = [0, 0];
+    const hasPlant: [boolean, boolean] = [false, false];
     for (const b of this.buildings) {
       if (b.hp <= 0) continue;
       const gen = BUILDING_STATS[b.kind].power;
       if (gen > 0) left[b.team] += gen;
+      if (b.kind === 'powerplant') hasPlant[b.team] = true;
     }
+    // emergency power: with no plant on the grid, the HQ back-feeds exactly one
+    // gold mine so a destroyed plant isn't an instant death spiral. The reserve
+    // is spent on the first live extractor (gold = card currency), never a derrick.
+    const emergency: [number, number] = [
+      hasPlant[0] ? 0 : EMERGENCY_POWER,
+      hasPlant[1] ? 0 : EMERGENCY_POWER
+    ];
     for (const b of this.buildings) {
       if (b.hp <= 0) continue;
       const draw = -BUILDING_STATS[b.kind].power;
@@ -548,6 +559,9 @@ export class Sim {
       if (draw <= left[b.team]) {
         left[b.team] -= draw;
         b.powered = true;
+      } else if (b.kind === 'extractor' && draw <= emergency[b.team]) {
+        emergency[b.team] -= draw;
+        b.powered = true;
       } else {
         b.powered = false;
       }
@@ -555,6 +569,12 @@ export class Sim {
   }
 
   private income(dt: number): void {
+    // emergency fund: a team that has lost its last gold mine (after fielding
+    // one) gets a far richer HQ trickle so a flattened economy can claw back
+    const noMine: [boolean, boolean] = [
+      this.players[0].builtExtractor && !this.hasLiveBuilding(0, 'extractor'),
+      this.players[1].builtExtractor && !this.hasLiveBuilding(1, 'extractor')
+    ];
     for (const b of this.buildings) {
       if (b.hp <= 0) continue;
       if (b.boostTimer > 0) b.boostTimer = Math.max(0, b.boostTimer - dt); // decays even when dark
@@ -568,7 +588,8 @@ export class Sim {
       // auto-bank (they can't click), so manual-collect only gates human teams.
       const manual = this.rules.manualCollect && this.rules.humanTeams[b.team];
       if (b.kind === 'hq') {
-        p.gold += HQ_INCOME_GOLD * mult * dt;
+        const fund = noMine[b.team] ? EMERGENCY_FUND_MULT : 1;
+        p.gold += HQ_INCOME_GOLD * fund * mult * dt;
       } else if (b.kind === 'extractor') {
         const amt = EXTRACTOR_INCOME * b.rateMult * boost * mult * dt;
         if (manual) b.stored = Math.min(STORE_CAP_GOLD, b.stored + amt);

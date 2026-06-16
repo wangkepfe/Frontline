@@ -4,6 +4,7 @@ import type { BuildingKind, TeamId, UnitKind } from '../sim/types';
 import { TEAM_COLORS } from './art/palette';
 import { UNIT_SCALE, buildBuildingRig, buildUnitRig } from './art/catalog';
 import { TILE_TOP, TerrainHandle, buildTerrain as buildBoard } from './art/terrain';
+import type { Biome } from './art/biomes';
 import type { BuildingRigHandle, UnitRigHandle } from './art/rig';
 
 /**
@@ -13,10 +14,10 @@ import type { BuildingRigHandle, UnitRigHandle } from './art/rig';
  */
 
 export { TEAM_COLORS, TILE_TOP, UNIT_SCALE, buildBuildingRig, buildUnitRig };
-export type { BuildingRigHandle, TerrainHandle, UnitRigHandle };
+export type { Biome, BuildingRigHandle, TerrainHandle, UnitRigHandle };
 
-export function buildTerrain(map: GameMap): TerrainHandle {
-  return buildBoard(map);
+export function buildTerrain(map: GameMap, biome?: Biome): TerrainHandle {
+  return buildBoard(map, biome);
 }
 
 /** Static rest-pose mesh (placement holograms). */

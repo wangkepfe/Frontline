@@ -5,6 +5,7 @@ import { COLLECT_STEP, ESCALATE_DRAW_T, NUKE_UNLOCK_T, STORE_CAP_GOLD, STORE_CAP
 import { isValidPlacement, validPlacementTiles } from './sim/placement';
 import { createScene, SceneCtx } from './render/scene';
 import { GameView } from './render/view';
+import type { BiomeId } from './render/art/biomes';
 import { Hud } from './ui/hud';
 import { icon } from './ui/icons';
 import { sfx, sfxForSimEvent } from './audio/sfx';
@@ -13,12 +14,22 @@ import type { NetCommand } from './net/protocol';
 import type { Transport } from './net/transport';
 import type { CardRef, SimOptions, TeamId } from './sim/types';
 
-/** Tutorial hint: shows while `show` is true, retires permanently once `done`. */
+/** A bouncing on-screen arrow a hint can point at the thing the player must touch. */
+export type HintArrow =
+  | { kind: 'card'; id: string } // the hand slot currently holding this card id
+  | { kind: 'tile'; c: number; r: number } // a battlefield tile
+  | { kind: 'enemyHq' }
+  | { kind: 'ownHq' }
+  | { kind: 'badge' }; // the first ready resource-collect badge
+
+/** Tutorial hint: shows while `show` is true, retires permanently once `done`.
+ *  An optional arrow points the new player at the card/tile/badge to act on. */
 export interface Hint {
   id: string;
   text: string;
   show: (sim: Sim, game: Game) => boolean;
   done: (sim: Sim, game: Game) => boolean;
+  arrow?: HintArrow;
 }
 
 export interface GameOptions {
@@ -28,6 +39,9 @@ export interface GameOptions {
   aiLoadout?: Array<string | CardRef>;
   aiProfile?: AiProfile;
   simOptions?: SimOptions;
+  /** render-only biome skin for the battle terrain + lighting (campaign acts).
+   *  NEVER reaches the sim — same seed/map ⇒ byte-identical simulation. */
+  biome?: BiomeId;
   hints?: Hint[];
   onEnd: (winner: TeamId, sim: Sim) => void;
   /** Esc with nothing armed — open/close the pause menu (main.ts overlay) */
@@ -76,6 +90,8 @@ export class Game {
   /** out-of-power markers keyed by building id */
   private powerBadges = new Map<number, HTMLElement>();
   private worldUi: HTMLElement;
+  /** bouncing tutorial arrow that points at the current hint's target */
+  private tutArrow: HTMLElement | null = null;
   /** counters for hint predicates */
   stats = { cardsPlayed: 0, collects: 0 };
 
@@ -84,8 +100,8 @@ export class Game {
     this.sim = new Sim(opts.seed, [opts.playerLoadout, opts.aiLoadout ?? []], opts.simOptions);
     // no AI in multiplayer — both sides are human, the net carries their orders
     this.ai = opts.aiProfile && !opts.transport ? new AiController(1, opts.seed * 31 + 7, opts.aiProfile) : null;
-    this.sceneCtx = createScene(stage, this.localTeam);
-    this.view = new GameView(this.sceneCtx, this.sim);
+    this.sceneCtx = createScene(stage, this.localTeam, opts.biome);
+    this.view = new GameView(this.sceneCtx, this.sim, opts.biome);
     this.hud = hud;
     this.hud.localTeam = this.localTeam;
     this.hud.onCardClick = (slot, ev) => this.onCardPress(slot, ev);
@@ -103,6 +119,14 @@ export class Game {
     }
     this.worldUi = document.getElementById('world-ui')!;
     this.worldUi.innerHTML = '';
+    if (opts.hints?.length) {
+      const arrow = document.createElement('div');
+      arrow.className = 'tut-arrow hidden';
+      arrow.innerHTML =
+        '<svg viewBox="0 0 24 30" aria-hidden="true"><path d="M12 30 2 16h6V0h8v16h6z"/></svg>';
+      this.worldUi.appendChild(arrow);
+      this.tutArrow = arrow;
+    }
 
     const canvas = this.sceneCtx.renderer.domElement;
     const onDown = (ev: PointerEvent) => this.onCanvasDown(ev);
@@ -170,8 +194,9 @@ export class Game {
       return;
     }
 
-    // untargeted and auto-placing cards play instantly — one click, no aiming
-    if (card.place === 'none' || card.auto) {
+    // untargeted cards (units, upgrades, orders) play instantly — no aiming.
+    // buildings (incl. extractor/derrick) arm and wait for a placement click.
+    if (card.place === 'none') {
       this.commitPlay(slot);
       this.disarm();
       return;
@@ -399,7 +424,7 @@ export class Game {
         if (badge.num.textContent !== label) badge.num.textContent = label;
         const px = this.view.projectTile({ c: b.tile.c, r: b.tile.r });
         badge.root.style.left = `${px.x}px`;
-        badge.root.style.top = `${px.y - 46}px`;
+        badge.root.style.top = `${px.y - 52}px`;
       }
     }
     for (const [id, badge] of this.badges) {
@@ -442,6 +467,7 @@ export class Game {
   private updateHints(): void {
     const hints = this.opts.hints;
     if (!hints) return;
+    let active: Hint | null = null;
     for (const h of hints) {
       if (this.hintsDone.has(h.id)) continue;
       if (this.hintsSeen.has(h.id) && h.done(this.sim, this)) {
@@ -451,10 +477,64 @@ export class Game {
       if (h.show(this.sim, this)) {
         this.hintsSeen.add(h.id);
         this.hud.showHint(h.text);
-        return;
+        active = h;
+        break;
       }
     }
-    this.hud.showHint(null);
+    if (!active) this.hud.showHint(null);
+    // also gate on sim.result: updateHints runs before this.ended flips on the resolving
+    // frame, so without this the arrow would flash for one frame at match end
+    this.updateArrow(this.ended || this.sim.result ? null : active?.arrow ?? null);
+  }
+
+  /** point the bouncing arrow at the active hint's target (or hide it) */
+  private updateArrow(arrow: HintArrow | null | undefined): void {
+    if (!this.tutArrow) return;
+    const pt = arrow ? this.resolveArrow(arrow) : null;
+    if (!pt) {
+      this.tutArrow.classList.add('hidden');
+      return;
+    }
+    this.tutArrow.style.left = `${pt.x}px`;
+    this.tutArrow.style.top = `${pt.y}px`;
+    this.tutArrow.classList.remove('hidden');
+  }
+
+  /** screen-space point the arrow should hover above, or null if unresolvable */
+  private resolveArrow(a: HintArrow): { x: number; y: number } | null {
+    switch (a.kind) {
+      case 'card': {
+        const r = this.hud.slotRectForCard(this.sim, a.id);
+        return r ? { x: r.left + r.width / 2, y: r.top - 4 } : null;
+      }
+      case 'tile': {
+        const px = this.view.projectTile({ c: a.c, r: a.r });
+        return { x: px.x, y: px.y - 54 };
+      }
+      case 'enemyHq':
+      case 'ownHq': {
+        const team: TeamId = a.kind === 'ownHq' ? this.localTeam : this.localTeam === 0 ? 1 : 0;
+        const hq = this.sim.hqOf(team);
+        if (!hq) return null;
+        const px = this.view.projectTile(hq.tile);
+        return { x: px.x, y: px.y - 60 };
+      }
+      case 'badge': {
+        for (const b of this.sim.buildings) {
+          if (b.team !== this.localTeam || b.hp <= 0) continue;
+          if (b.kind !== 'extractor' && b.kind !== 'derrick') continue;
+          if (Math.floor(b.stored / COLLECT_STEP) * COLLECT_STEP < COLLECT_STEP) continue;
+          const px = this.view.projectTile(b.tile);
+          return { x: px.x, y: px.y - 96 };
+        }
+        return null;
+      }
+    }
+  }
+
+  /** id of the card the player currently has armed (for hint triggers), or null */
+  armedCardId(): string | null {
+    return this.armedCard()?.id ?? null;
   }
 
   private frame(t: number, scheduleNext = true): void {
@@ -561,6 +641,8 @@ export class Game {
     this.badges.clear();
     for (const [, badge] of this.powerBadges) badge.remove();
     this.powerBadges.clear();
+    this.tutArrow?.remove();
+    this.tutArrow = null;
     this.view.dispose();
     this.stage.innerHTML = '';
   }

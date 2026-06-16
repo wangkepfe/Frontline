@@ -48,8 +48,6 @@ export interface CardDef {
   unitMods?: UnitMods;
   buildingMods?: BuildingMods;
   carpet?: boolean; // airstrike B: line of three strikes
-  /** one-click play: the sim auto-builds on the nearest valid site (no targeting) */
-  auto?: boolean;
   /** nuclear strike: NUKE stats instead of AIRSTRIKE, one-shots anything */
   nuke?: boolean;
   /** team-wide standing order issued for ORDER_DURATION seconds */
@@ -83,8 +81,8 @@ export function tierLabel(tier: CardTier): string {
 export const CARDS: Record<string, CardDef> = {
   // ── buildings ──────────────────────────────────────────────
   powerplant: { id: 'powerplant', name: 'Power Plant', kind: 'building', gold: 30, oil: 0, place: 'land', tier: 'base', building: 'powerplant', desc: 'Generates 8 power. Everything else needs power — build this first.' },
-  extractor: { id: 'extractor', name: 'Gold Extractor', kind: 'building', gold: 60, oil: 0, place: 'gold', tier: 0, building: 'extractor', auto: true, desc: 'One click: builds on the nearest free gold mine. +3 gold/s. Unlocks tier 1.' },
-  derrick:   { id: 'derrick', name: 'Oil Derrick', kind: 'building', gold: 70, oil: 0, place: 'oil', tier: 1, building: 'derrick', auto: true, desc: 'One click: builds on the nearest free oil field. +2 oil/s. Unlocks tier 2.' },
+  extractor: { id: 'extractor', name: 'Gold Extractor', kind: 'building', gold: 60, oil: 0, place: 'gold', tier: 0, building: 'extractor', desc: 'Place on a gold mine. +3 gold/s — click its badge to bank. Unlocks tier 1.' },
+  derrick:   { id: 'derrick', name: 'Oil Derrick', kind: 'building', gold: 70, oil: 0, place: 'oil', tier: 1, building: 'derrick', desc: 'Place on an oil field. +2 oil/s — click its badge to bank. Unlocks tier 2.' },
   barracks:  { id: 'barracks', name: 'Barracks', kind: 'building', gold: 120, oil: 0, place: 'land', tier: 1, building: 'barracks', desc: 'Trains a Rifle Squad every 11s, pushing the nearest lane.' },
   factory:   { id: 'factory', name: 'War Factory', kind: 'building', gold: 150, oil: 80, place: 'land', tier: 2, building: 'factory', desc: 'Rolls out a Battle Tank every 20s.' },
   bunker:    { id: 'bunker', name: 'MG Bunker', kind: 'building', gold: 90, oil: 0, place: 'land', tier: 1, building: 'bunker', desc: 'Static MG nest. Shreds infantry.' },
@@ -158,14 +156,17 @@ export const DEFAULT_LOADOUT: string[] = [
   'rifle', 'rifle', 'rocket', 'tank', 'howitzer', 'harvester', 'airstrike', 'attackorder'
 ];
 
+// AI doctrine decks. The armor/rush decks deliberately field B-side cards so the
+// opponent actually exploits the alternate sides (Siege Tank vs structures, Gun
+// Buggy as a skirmisher, Hunter rockets) — its scorer is B-side-aware (ai.ts).
 export const AI_LOADOUTS: Record<string, string[]> = {
   balanced: DEFAULT_LOADOUT,
   armor: [
     'powerplant', 'powerplant', 'extractor', 'extractor', 'derrick', 'derrick', 'factory', 'factory',
-    'atturret', 'tank', 'tank', 'rocket', 'rifle', 'harvester', 'sabot', 'attackorder'
+    'atturret', 'tank', 'tank_b', 'rocket', 'harvester', 'sabot', 'reactive', 'attackorder'
   ],
   rush: [
     'powerplant', 'powerplant', 'extractor', 'extractor', 'derrick', 'barracks', 'barracks', 'rifle',
-    'rifle', 'rifle', 'rocket', 'rocket', 'buggy', 'harvester', 'attackorder', 'hiteconomy'
+    'rifle', 'rocket', 'rocket_b', 'buggy_b', 'harvester', 'attackorder', 'hiteconomy', 'airstrike'
   ]
 };

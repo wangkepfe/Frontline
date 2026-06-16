@@ -55,7 +55,10 @@ export function validPlacementTiles(sim: Sim, team: TeamId, card: CardDef): Tile
  * anything: each neighboring building, wall or resource node narrows a lane
  * that units and trucks march through, so clearance outranks closeness.
  */
-export function clearestValidTile(sim: Sim, team: TeamId, card: CardDef, want: TilePos): TilePos | null {
+export function clearestValidTile(sim: Sim, team: TeamId, card: CardDef, want: TilePos, away?: TilePos): TilePos | null {
+  // when `away` (the enemy HQ) is given, bias toward the REAR: a forward power
+  // plant is a raider's prize, so penalize tiles that sit on the enemy side of `want`
+  const axisLen = away ? (Math.hypot(away.c - want.c, away.r - want.r) || 1) : 1;
   let best: TilePos | null = null;
   let bestScore = Infinity;
   for (const t of validPlacementTiles(sim, team, card)) {
@@ -74,7 +77,12 @@ export function clearestValidTile(sim: Sim, team: TeamId, card: CardDef, want: T
       }
     }
     // one crowded neighbor costs as much as 4 tiles of distance
-    const score = crowd * 4 + chebyshev(t, want) + Math.abs(t.c - want.c) * 0.01;
+    let score = crowd * 4 + chebyshev(t, want) + Math.abs(t.c - want.c) * 0.01;
+    if (away) {
+      // projection of (t - want) onto the want→enemy axis; positive = forward
+      const fwd = ((away.c - want.c) * (t.c - want.c) + (away.r - want.r) * (t.r - want.r)) / axisLen;
+      if (fwd > 0) score += fwd * 2.5;
+    }
     if (score < bestScore) {
       bestScore = score;
       best = t;

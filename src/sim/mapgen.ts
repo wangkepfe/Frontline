@@ -32,6 +32,11 @@ class Canvas13 {
     const mirrored = ch === '1' ? '2' : ch === '2' ? '1' : ch;
     this.grid[mr][mc] = mirrored;
   }
+  /** write a single cell WITHOUT mirroring — only the defender fortification
+   *  pass uses this, since breaking symmetry is the whole point there */
+  setRaw(c: number, r: number, ch: string): void {
+    this.grid[r][c] = ch;
+  }
   rows(): string[] {
     return this.grid.map((row) => row.join(''));
   }
@@ -44,6 +49,26 @@ function cheb(a: TilePos, b: TilePos): number {
 /** cells in the canonical half (scan order before the center cell) */
 function inHalf(c: number, r: number): boolean {
   return r * W + c < (H * W - 1) / 2;
+}
+
+function inBounds(c: number, r: number): boolean {
+  return c >= 0 && r >= 0 && c < W && r < H;
+}
+
+function clamp01(x: number): number {
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
+/** unit-step direction from team A's HQ toward the enemy HQ ((+1,-1) here) */
+const TOWARD_ENEMY: TilePos = {
+  c: Math.sign(HQ_B.c - HQ_A.c),
+  r: Math.sign(HQ_B.r - HQ_A.r)
+};
+
+/** a tile sits "behind" team A's HQ when it lies on the far side from the enemy
+ *  — the safe rear where a raided-turn-one home mine should never be */
+function behindHqA(c: number, r: number): boolean {
+  return (c - HQ_A.c) * TOWARD_ENEMY.c + (r - HQ_A.r) * TOWARD_ENEMY.r < 0;
 }
 
 interface GenState {
@@ -190,8 +215,13 @@ function placeResources(st: GenState): boolean {
     }
     return false;
   };
-  // home mine: safe, by the HQ
-  const home = pickLand(st, (c, r) => cheb({ c, r }, HQ_A) >= 1 && cheb({ c, r }, HQ_A) <= 2);
+  // home mine: SAFE — placed BEHIND the HQ (the far side from the enemy) so the
+  // player's opening economy can't be raided turn one; the mirror gives the enemy
+  // the same protected rear mine. Falls back to any adjacent tile if the rear is
+  // somehow full (it never is in practice — mountains can't sit within cheb 2).
+  const home =
+    pickLand(st, (c, r) => behindHqA(c, r) && cheb({ c, r }, HQ_A) >= 1 && cheb({ c, r }, HQ_A) <= 2) ??
+    pickLand(st, (c, r) => cheb({ c, r }, HQ_A) >= 1 && cheb({ c, r }, HQ_A) <= 2);
   if (!home) return false;
   cv.set(home.c, home.r, 'G');
   // mid mine: your half, must be defended on purpose
@@ -233,6 +263,80 @@ function placeForests(st: GenState): void {
   }
 }
 
+/**
+ * Defender fortification — the ONE place the generator deliberately breaks
+ * 180° symmetry, for epic elite/boss sectors. The enemy (team 1, HQ_B) gets:
+ *   - a mountain BASTION walling its front approach with a single chokepoint,
+ *   - extra ECONOMY (gold, and at higher bias oil) safe in its rear,
+ * both scaled by `bias` ∈ (0,1]. Everything is written un-mirrored, so the
+ * attacker (team 0) faces a fortress without an equivalent of its own. The
+ * later validate() pass still guarantees the map stays connected and the
+ * attacker can reach every objective; the bastion always leaves a chokepoint
+ * gate, and on the rare seed where terrain still seals the map, validate() peels
+ * the SYMMETRIC clusters (the bastion is intentionally NOT peelable — peeling
+ * mirrors, which would corrupt the fair half) and, failing that, the generator
+ * just rerolls the seed.
+ */
+function fortifyDefender(st: GenState, bias: number): void {
+  const { cv, rng } = st;
+  const b = clamp01(bias);
+
+  // front = from the enemy HQ toward the attacker — the side worth walling
+  const front: TilePos = { c: Math.sign(HQ_A.c - HQ_B.c), r: Math.sign(HQ_A.r - HQ_B.r) };
+  const facingAttacker = (c: number, r: number) =>
+    (c - HQ_B.c) * front.c + (r - HQ_B.r) * front.r > 0;
+  // the gate: the cell two steps dead-ahead on the attacker axis, kept clear so
+  // the bastion is a chokepoint, never a seal
+  const gate: TilePos = { c: HQ_B.c + front.c * 2, r: HQ_B.r + front.r * 2 };
+
+  // ── bastion arc: mountains across the front at range 2-3, never within cheb 1
+  //    of the gate (leaving a 3-wide opening the attacker must funnel through) ──
+  const arc: TilePos[] = [];
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      if (cv.get(c, r) !== '.') continue;
+      const d = cheb({ c, r }, HQ_B);
+      if (d < 2 || d > 3 || !facingAttacker(c, r)) continue;
+      if (cheb({ c, r }, gate) <= 1) continue;
+      arc.push({ c, r });
+    }
+  }
+  rng.shuffle(arc);
+  const wallCount = Math.min(arc.length, Math.round(3 + b * 5)); // elite≈5, boss≈8
+  for (let i = 0; i < wallCount; i++) cv.setRaw(arc[i].c, arc[i].r, 'M');
+
+  // ── defender economy edge: extra gold (then oil) safe in the enemy's rear ──
+  const rearGold = b >= 0.8 ? 2 : b >= 0.35 ? 1 : 0;
+  const rearOil = b >= 0.6 ? 1 : 0;
+  const minesClear = (c: number, r: number) => {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const cc = c + dc, rr = r + dr;
+        if (!inBounds(cc, rr)) continue;
+        const ch = cv.get(cc, rr);
+        if (ch === 'G' || ch === 'O') return false; // extractors need their own tile + docking room
+      }
+    }
+    return true;
+  };
+  const placeRear = (ch: string) => {
+    const opts: TilePos[] = [];
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        if (cv.get(c, r) !== '.' || facingAttacker(c, r)) continue; // rear/side only
+        const d = cheb({ c, r }, HQ_B);
+        if (d < 2 || d > 4 || !minesClear(c, r)) continue;
+        opts.push({ c, r });
+      }
+    }
+    if (opts.length === 0) return;
+    const pick = opts[rng.int(opts.length)];
+    cv.setRaw(pick.c, pick.r, ch);
+  };
+  for (let i = 0; i < rearGold; i++) placeRear('G');
+  for (let i = 0; i < rearOil; i++) placeRear('O');
+}
+
 /** mountains must never seal anything off: validate, peel clusters if needed */
 function validate(st: GenState): boolean {
   let layout: string[];
@@ -268,7 +372,21 @@ function validate(st: GenState): boolean {
   return false;
 }
 
-export function generateMap(seed: number): string[] {
+export interface MapGenOptions {
+  /**
+   * Defender (team 1) advantage for epic elite/boss sectors. 0 = a fair,
+   * 180°-symmetric map (the default — every skirmish and normal battle). Above
+   * 0 fortifies the enemy HQ with a mountain bastion and tilts the economy to
+   * the defender, scaling with the value (≈0.5 elite, ≈0.85 mid-boss, 1 boss
+   * citadel). The map still stays connected with every objective reachable by
+   * the attacker (validated). The terrain is one half of an "epic" fight; the
+   * enemy deck + war chest are the other.
+   */
+  bias?: number;
+}
+
+export function generateMap(seed: number, opts: MapGenOptions = {}): string[] {
+  const bias = clamp01(opts.bias ?? 0);
   for (let attempt = 0; attempt < 30; attempt++) {
     const rng = new Rng((seed + attempt * 7919) >>> 0);
     const st: GenState = {
@@ -284,6 +402,9 @@ export function generateMap(seed: number): string[] {
     placeMountains(st);
     if (!placeResources(st)) continue;
     placeForests(st);
+    // asymmetric defender fortress LAST, on free land only, so it never
+    // clobbers the fair symmetric base it sits on top of
+    if (bias > 0) fortifyDefender(st, bias);
     if (validate(st)) return st.cv.rows();
   }
   // pathological seed: fall back to the curated map (never expected in practice)

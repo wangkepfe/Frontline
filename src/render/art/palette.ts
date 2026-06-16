@@ -37,7 +37,21 @@ export const C = {
   glass:    { lit: 0x39565e, base: 0x2b4249, shade: 0x1f3137 } as Ramp,
   // team enamel — the most saturated thing on the board
   team0:    { lit: 0x4b7fdd, base: 0x2f63c8, shade: 0x244a96 } as Ramp,
-  team1:    { lit: 0xe66a3c, base: 0xd14f2a, shade: 0xa53c20 } as Ramp
+  team1:    { lit: 0xe66a3c, base: 0xd14f2a, shade: 0xa53c20 } as Ramp,
+
+  // ── biome terrain: DESERT / BADLANDS (campaign act II) ──────────────────────
+  dune:     { lit: 0xe8d6a6, base: 0xd4bd86, shade: 0xb89b63 } as Ramp, // wind-blown pale sand
+  clay:     { lit: 0xc0895a, base: 0xa6724a, shade: 0x855639 } as Ramp, // dry wadi earth, river beds
+  mesa:     { lit: 0xc06f44, base: 0xa1542f, shade: 0x7c3e22 } as Ramp, // red rock strata, buttes
+  scrub:    { lit: 0x9c9a5d, base: 0x80814a, shade: 0x636538 } as Ramp, // sun-bleached khaki brush
+  cactus:   { lit: 0x6f9059, base: 0x577444, shade: 0x405631 } as Ramp, // dusty desert green
+
+  // ── biome terrain: FROZEN HIGHLANDS (campaign act III) ─────────────────────
+  snow:     { lit: 0xf3f5f7, base: 0xdfe6ec, shade: 0xbdc9d6 } as Ramp, // lit snow, cool shade
+  ice:      { lit: 0xbedde7, base: 0x9cc6d7, shade: 0x77a6bb } as Ramp, // glacial pale blue
+  frost:    { lit: 0xcdd6dd, base: 0xaab6c1, shade: 0x8792a0 } as Ramp, // cold rime grey
+  pine:     { lit: 0x47614f, base: 0x344b3c, shade: 0x24372d } as Ramp, // dark cold conifer
+  slate:    { lit: 0x8a93a0, base: 0x6b7480, shade: 0x4d5561 } as Ramp  // cold dark crag
 };
 
 /** UI-facing team hexes (health bars, badges) — brighter than the enamel. */

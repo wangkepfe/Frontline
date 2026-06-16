@@ -1,7 +1,12 @@
 import { CARDS, tierLabel, tierRequirement } from '../sim/cards';
 import type { CardDef, CardKind } from '../sim/cards';
+import {
+  AIRSTRIKE, BUILDING_STATS, DERRICK_INCOME, EXTRACTOR_INCOME, FORGE_BUILDING, FORGE_STRIKE,
+  FORGE_UNIT, UNIT_STATS
+} from '../sim/stats';
 import { cardArt } from './cardArt';
 import { cardIcon, icon } from './icons';
+import { glossify } from './tooltips';
 
 /**
  * The one card-anatomy builder (DESIGN_GUIDEBOOK.md §7) — hand cards, reward
@@ -60,7 +65,14 @@ export function cardFaceInner(cardId: string, upgraded: boolean, opts: FaceOpts 
   const def = CARDS[cardId];
   const req = tierRequirement(def);
   const cls = classification(def);
+  // glossary keyword links are inert (and could fight click-to-play) in the live
+  // battle hand — wire them only on inspectable faces (deck, rewards, shop, …)
+  const showKw = !opts.hand;
+  const nameHtml = showKw ? glossify(def.name) : def.name;
+  const descHtml = showKw ? glossify(def.desc) : def.desc;
   const upBadge = upgraded ? `<span class="upbadge">${icon('star')}</span>` : '';
+  // an upgraded card reads as a PROMOTION, not just a starred copy
+  const vetTag = upgraded ? '<span class="vettag" data-kw="veteran">VETERAN</span>' : '';
   const sideBadge = def.side === 'B' ? '<span class="sidebadge">B</span>' : '';
   const lock = opts.hand
     ? `<div class="lock">${icon('lock')}<span class="lockreq">${
@@ -76,13 +88,48 @@ export function cardFaceInner(cardId: string, upgraded: boolean, opts: FaceOpts 
     }</div>
     <div class="tiertag">${tierLabel(def.tier)}</div>
     <div class="cbody">
-      <div class="cname">${def.name}${upBadge}${sideBadge}</div>
-      <div class="ckind">${def.kind}</div>
-      <div class="cdesc">${def.desc}</div>
+      <div class="cname">${nameHtml}${upBadge}${sideBadge}</div>
+      <div class="ckind">${vetTag}${def.kind}</div>
+      <div class="cdesc">${descHtml}</div>
     </div>
-    ${opts.hand ? `<div class="ttl">EXP <b>0:00</b></div>` : ''}
+    ${opts.hand ? `<div class="ttl">EXP <b>0:00</b></div><div class="ttlbar"><i></i></div>` : ''}
     ${opts.hotkey ? `<div class="key">${opts.hotkey}</div>` : ''}
     ${lock}`;
+}
+
+export interface ForgeDelta { label: string; from: string; to: string }
+
+const r1 = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+/**
+ * Before→after stats a Veteran (forge) refit grants a card, so the workshop /
+ * reward UI can show exactly WHAT improves and by how much. Pulls live numbers
+ * from the balance tables × the card's own A/B mods × the FORGE multipliers.
+ */
+export function forgeDeltas(cardId: string): ForgeDelta[] {
+  const def = CARDS[cardId];
+  const out: ForgeDelta[] = [];
+  const d = (label: string, base: number, mult: number) =>
+    out.push({ label, from: r1(base), to: r1(base * mult) });
+  if (def.unit) {
+    const st = UNIT_STATS[def.unit];
+    d('HP', st.hp * (def.unitMods?.hpMult ?? 1), FORGE_UNIT.hp);
+    const dmg = st.damage * (def.unitMods?.dmgMult ?? 1);
+    if (dmg > 0) d('Damage', dmg, FORGE_UNIT.dmg);
+  } else if (def.building) {
+    const st = BUILDING_STATS[def.building];
+    d('HP', st.hp * (def.buildingMods?.hpMult ?? 1), FORGE_BUILDING.hp);
+    if (def.building === 'extractor') d('Gold / s', EXTRACTOR_INCOME, FORGE_BUILDING.rate);
+    else if (def.building === 'derrick') d('Oil / s', DERRICK_INCOME, FORGE_BUILDING.rate);
+    else if (st.prodInterval > 0) {
+      // shorter is better — show the faster cadence
+      const base = st.prodInterval * (def.buildingMods?.prodMult ?? 1);
+      out.push({ label: 'Build time', from: `${r1(base)}s`, to: `${r1(base * FORGE_BUILDING.prod)}s` });
+    } else if (st.damage > 0) d('Damage', st.damage * (def.buildingMods?.dmgMult ?? 1), FORGE_UNIT.dmg);
+  } else if (def.kind === 'tactic' && !def.order && !def.nuke) {
+    d('Blast damage', AIRSTRIKE.damage, FORGE_STRIKE);
+  }
+  return out;
 }
 
 /** render a battle-hand face into an existing slot element */
